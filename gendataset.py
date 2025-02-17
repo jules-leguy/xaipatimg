@@ -4,14 +4,17 @@ import csv
 import tqdm
 import shutil
 import os
+from sklearn.model_selection import train_test_split
 
-def create_dataset_based_on_rule(db_path, dataset_path, dataset_pos_samples_nb, dataset_neg_samples_nb, rule_fun,
-                                 random_seed=42):
+def create_dataset_based_on_rule(db_root_path, csv_filename_train, csv_filename_valid, valid_size,
+                                 dataset_pos_samples_nb, dataset_neg_samples_nb, rule_fun, random_seed=42):
     """
     Function that creates a training dataset based on the rule that is defined in the rule_fun function. The dataset is
     saved as a csv file and contains a given number of positive and negative samples.
-    :param db_path: path to the database in json format.
-    :param dataset_path: path to the output dataset in csv format.
+    :param db_root_path: path to the root of the database.
+    :param csv_filename_train: name of the csv file that contains the training dataset.
+    :param csv_filename_valid: name of the csv file that contains the validation dataset.
+    :param valid_size: number of samples or proportion of the dataset to be put in the validation set.
     :param dataset_pos_samples_nb: number of positive samples to be contained in the dataset.
     :param dataset_neg_samples_nb: number of negative samples to be contained in the dataset.
     :param rule_fun: boolean function that defines whether the given image content is positive or negative.
@@ -19,7 +22,7 @@ def create_dataset_based_on_rule(db_path, dataset_path, dataset_pos_samples_nb, 
     :return: None
     """
     # Load and shuffle images content
-    db = load_db(db_path)
+    db = load_db(db_root_path)
     img_content_list = list(db.values())
     np.random.seed(random_seed)
     np.random.shuffle(img_content_list)
@@ -43,22 +46,34 @@ def create_dataset_based_on_rule(db_path, dataset_path, dataset_pos_samples_nb, 
         raise RuntimeError("Could not extract enough positive (" + str(pos_nb) + "/" + str(dataset_pos_samples_nb) +
                            ") or negative (" + str(neg_nb) + "/" + str(dataset_neg_samples_nb) +") samples.")
 
-    # Forming CSV content
-    pos_class_vect = np.full(pos_nb, 1)
-    neg_class_vect = np.full(neg_nb, 0)
-    csv_content = np.array([np.concatenate((pos_list, neg_list), axis=0),
-                            np.concatenate((pos_class_vect, neg_class_vect), axis=0)]).T
+    # Forming dataset content
+    y = np.concatenate((np.full(pos_nb, 1), np.full(neg_nb, 0)), axis=0)
+    img_list = np.concatenate((pos_list, neg_list), axis=0)
 
-    # Writing dataset to CSV file
-    with open(dataset_path, 'w') as f:
+    # Splitting training and validation set
+    img_list_train, img_list_valid, y_train, y_valid = train_test_split(img_list, y, test_size=valid_size,
+                                                                        random_state=random_seed)
+
+    csv_content_train = np.array([np.concatenate((["path"], img_list_train), axis=0),
+                                  np.concatenate((["class"], y_train), axis=0)]).T
+
+    csv_content_valid = np.array([np.concatenate((["path"], img_list_valid), axis=0),
+                                  np.concatenate((["class"], y_valid), axis=0)]).T
+
+    # Writing dataset to CSV files
+    with open(os.path.join(db_root_path, csv_filename_train), 'w') as f:
         writer = csv.writer(f)
-        writer.writerows(csv_content)
+        writer.writerows(csv_content_train)
+    with open(os.path.join(db_root_path, csv_filename_valid), 'w') as f:
+        writer = csv.writer(f)
+        writer.writerows(csv_content_valid)
 
-def extract_sample_from_dataset(dataset_path, output_dir_path, pos_samples_nb, neg_samples_nb):
+def extract_sample_from_dataset(db_root_path, csv_filename, output_dir_path, pos_samples_nb, neg_samples_nb):
     """
     Function that copies samples from the given dataset in order to visualize the images.
-    :param dataset_path: path to the dataset in csv format.
-    :param output_dir_path: path where to copy the image samples.
+    :param db_root_path: path to the root of the database.
+    :param csv_filename: name of the csv file contained in the database root folder.
+    :param output_dir_path: path where to save the sample of the dataset.
     :param pos_samples_nb: number of positive samples to extract.
     :param neg_samples_nb: number of negative samples to extract.
     :return: None
@@ -77,12 +92,12 @@ def extract_sample_from_dataset(dataset_path, output_dir_path, pos_samples_nb, n
         os.makedirs(neg_dir_path)
 
     # Copy files
-    with open(dataset_path, "r") as csv_file:
+    with open(os.path.join(db_root_path, csv_filename), "r") as csv_file:
         csv_reader = csv.reader(csv_file, delimiter=',')
         for row in tqdm.tqdm(csv_reader):
             if row[1] == "1" and pos_nb < pos_samples_nb:
-                shutil.copyfile(row[0], os.path.join(pos_dir_path, os.path.basename(row[0])))
+                shutil.copyfile(os.path.join(db_root_path, row[0]), os.path.join(pos_dir_path, os.path.basename(row[0])))
                 pos_nb += 1
             elif row[1] == "0" and neg_nb < neg_samples_nb:
-                shutil.copyfile(row[0], os.path.join(neg_dir_path, os.path.basename(row[0])))
+                shutil.copyfile(os.path.join(db_root_path, row[0]), os.path.join(neg_dir_path, os.path.basename(row[0])))
                 neg_nb += 1

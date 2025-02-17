@@ -77,10 +77,10 @@ def gen_img(img_path, content, division=(4,7), dimension=(400, 700), overwrite=F
     # Save the image
     img.save(img_path)
 
-def gen_img_and_save_db(db, db_path, overwrite=False, n_jobs=1):
+def gen_img_and_save_db(db, db_root_path, overwrite=False, n_jobs=1):
     """
     Generate every image from the DB.
-    :param db_path: path where to save the DB
+    :param db_root_path: path to the root of the DB
     :param db: database of image information and location
     :param overwrite: whether to overwrite existing images. If False, the images that already exist in the filesystem
     are ignored by this function.
@@ -89,9 +89,10 @@ def gen_img_and_save_db(db, db_path, overwrite=False, n_jobs=1):
     """
     img_data_list = list(db.values())
 
-    # Parallel generation of the images
-    Parallel(n_jobs=n_jobs)(delayed(gen_img)(img_data_list[i]["path"], img_data_list[i]["content"],
+    Parallel(n_jobs=n_jobs)(delayed(gen_img)(os.path.join(db_root_path, img_data_list[i]["path"]),
+                                             img_data_list[i]["content"],
                                              img_data_list[i]["division"], img_data_list[i]["size"],
                                              overwrite) for i in tqdm.tqdm(range(len(img_data_list))))
+    # Parallel generation of the images
 
-    save_db(db=db, path=db_path)
+    save_db(db=db, db_root_path=db_root_path)
