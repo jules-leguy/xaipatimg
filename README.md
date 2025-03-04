@@ -1,4 +1,4 @@
-# XAIGenImg
+# xaipatimg
 
 Contains a set of tools to generate datasets of images which are grids of geometrical shapes, and to extract subsets of
 images that follow certain patterns. Also contains tools to facilitate the learning on the generated datasets with 
