@@ -1,5 +1,5 @@
 from PIL import Image, ImageDraw
-from dbimg import save_db
+from xaipatimg.datagen.dbimg import save_db
 import math
 import os
 import tqdm
@@ -77,10 +77,10 @@ def gen_img(img_path, content, division=(4,7), dimension=(400, 700), overwrite=F
     # Save the image
     img.save(img_path)
 
-def gen_img_and_save_db(db, db_root_path, overwrite=False, n_jobs=1):
+def gen_img_and_save_db(db, db_dir, overwrite=False, n_jobs=1):
     """
     Generate every image from the DB.
-    :param db_root_path: path to the root of the DB
+    :param db_dir: path to the root of the DB
     :param db: database of image information and location
     :param overwrite: whether to overwrite existing images. If False, the images that already exist in the filesystem
     are ignored by this function.
@@ -89,10 +89,10 @@ def gen_img_and_save_db(db, db_root_path, overwrite=False, n_jobs=1):
     """
     img_data_list = list(db.values())
 
-    Parallel(n_jobs=n_jobs)(delayed(gen_img)(os.path.join(db_root_path, img_data_list[i]["path"]),
+    Parallel(n_jobs=n_jobs)(delayed(gen_img)(os.path.join(db_dir, img_data_list[i]["path"]),
                                              img_data_list[i]["content"],
                                              img_data_list[i]["division"], img_data_list[i]["size"],
                                              overwrite) for i in tqdm.tqdm(range(len(img_data_list))))
     # Parallel generation of the images
 
-    save_db(db=db, db_root_path=db_root_path)
+    save_db(db=db, db_dir=db_dir)

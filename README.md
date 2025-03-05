@@ -11,7 +11,7 @@ extracted according to rules. A dataset is composed of a folder that contains al
 their paths and content. A dataset is identified by the path of its root folder.
 
 ```python
-db_root_path = "path/to/database_v1.0"
+db_dir = "path/to/database_v1.0"
 ```   
 ### Content of the database
 
@@ -21,8 +21,9 @@ file).
 An existing database can be loaded as such.
 
 ```python
-from dbimg import load_db
-db = load_db(db_root_path)    
+from xaipatimg.datagen.dbimg import load_db
+
+db = load_db(db_dir)    
 ```
 
 Or it can be created from scratch.
@@ -79,11 +80,12 @@ Then it must be filled according to the following format :
 Once the database content is set, the images can be generated using the following function.
 
 ```python
-from genimg import gen_img_and_save_db
-gen_img_and_save_db(db,                 # database dict object 
-                    db_root_path,       # path to the root folder
-                    overwrite=False,    # whether to overwrite images that may already exist in the database folder
-                    n_jobs=1)           # number of jobs for parallel execution
+from xaipatimg.datagen.genimg import gen_img_and_save_db
+
+gen_img_and_save_db(db,  # database dict object 
+                    db_dir,  # path to the root folder
+                    overwrite=False,  # whether to overwrite images that may already exist in the database folder
+                    n_jobs=1)  # number of jobs for parallel execution
 ```
 
 ## Dataset extraction
@@ -104,27 +106,31 @@ def contains_square(img_content):
 Then a learning dataset for this rule can be created the following way.
 
 ```python
-from gendataset import create_dataset_based_on_rule
+from xaipatimg.datagen.gendataset import create_dataset_based_on_rule
 import os
+
 csv_name_train = "contains_square_train.csv"
 csv_name_valid = "contains_square_valid.csv"
 
-create_dataset_based_on_rule(db_root_path,                   # path to the folder that contains the DB
-                             csv_name_train,                 # name of the csv file that contains the training dataset
-                             csv_name_valid,                 # name of the csv file that contains the validation dataset
-                             valid_size=0.2,                 # proportion or number of samples in the validation dataset    
-                             dataset_pos_samples_nb=10000,   # number of positive samples to be extracted from the database
-                             dataset_neg_samples_nb=10000,   # number of negative samples to be extracted from the database
-                             rule_fun=contains_square)       # function that defines the rule
+create_dataset_based_on_rule(db_dir,          # path to the directory that contains the DB
+                             csv_name_train,  # name of the csv file that contains the training dataset
+                             csv_name_valid,  # name of the csv file that contains the validation dataset
+                             valid_size=0.2,  # proportion or number of samples in the validation dataset    
+                             dataset_pos_samples_nb=10000,
+                             # number of positive samples to be extracted from the database
+                             dataset_neg_samples_nb=10000,
+                             # number of negative samples to be extracted from the database
+                             rule_fun=contains_square)  # function that defines the rule
 ```
 
 In order to visualize a sample of the dataset, the following function can be used.
 
 ```python
-from gendataset import extract_sample_from_dataset
-extract_sample_from_dataset(db_root_path,                    # path to the folder that contains the DB
-                            csv_name_train,                  # path to the csv file that contains the dataset
-                            output_dir_path=sample_img_path, # name of the folder in which the sample will be written
-                            pos_samples_nb=1000,             # number of positive samples
-                            neg_samples_nb=1000)             # number of negative samples
+from xaipatimg.datagen.gendataset import extract_sample_from_dataset
+
+extract_sample_from_dataset(db_dir,  # path to the folder that contains the DB
+                            csv_name_train,  # path to the csv file that contains the dataset
+                            output_dir_path=sample_img_path,  # name of the folder in which the sample will be written
+                            pos_samples_nb=1000,  # number of positive samples
+                            neg_samples_nb=1000)  # number of negative samples
 ```
