@@ -156,19 +156,19 @@ dependencies:
       - mpmath==1.3.0
       - networkx==3.3
       - numpy==1.26.0
-      - nvidia-cublas-cu12==12.6.4.1
-      - nvidia-cuda-cupti-cu12==12.6.80
-      - nvidia-cuda-nvrtc-cu12==12.6.77
-      - nvidia-cuda-runtime-cu12==12.6.77
-      - nvidia-cudnn-cu12==9.5.1.17
-      - nvidia-cufft-cu12==11.3.0.4
-      - nvidia-curand-cu12==10.3.7.77
-      - nvidia-cusolver-cu12==11.7.1.2
-      - nvidia-cusparse-cu12==12.5.4.2
-      - nvidia-cusparselt-cu12==0.6.3
-      - nvidia-nccl-cu12==2.21.5
-      - nvidia-nvjitlink-cu12==12.6.85
-      - nvidia-nvtx-cu12==12.6.77
+      - nvidia-cublas-cu12
+      - nvidia-cuda-cupti-cu12
+      - nvidia-cuda-nvrtc-cu12
+      - nvidia-cuda-runtime-cu12
+      - nvidia-cudnn-cu12
+      - nvidia-cufft-cu12
+      - nvidia-curand-cu12
+      - nvidia-cusolver-cu12
+      - nvidia-cusparse-cu12
+      - nvidia-cusparselt-cu12
+      - nvidia-nccl-cu12
+      - nvidia-nvjitlink-cu12
+      - nvidia-nvtx-cu12
       - opencv-python==4.11.0.86
       - pandas==2.0.0
       - pillow==11.0.0
@@ -180,9 +180,9 @@ dependencies:
       - sympy==1.13.1
       - tensorboard==2.18.0
       - tensorboard-data-server==0.7.2
-      - torch==2.6.0+cu126
-      - torchaudio==2.6.0+cu126
-      - torchvision==0.21.0+cu126
+      - torch==2.6.0
+      - torchaudio==2.6.0
+      - torchvision==0.21.0
       - triton==3.2.0
       - ttach==0.0.3
       - tzdata==2025.1
