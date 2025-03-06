@@ -74,13 +74,14 @@ def create_dataset_based_on_rule(db_dir, csv_filename_train, csv_filename_test, 
                                   np.concatenate((["class"], y_valid), axis=0)]).T
 
     # Writing dataset to CSV files
-    with open(os.path.join(db_dir, csv_filename_train), 'w') as f:
+    os.makedirs(os.path.join(db_dir, "datasets"), exist_ok=True)
+    with open(os.path.join(db_dir, "datasets", csv_filename_train), 'w') as f:
         writer = csv.writer(f)
         writer.writerows(csv_content_train)
-    with open(os.path.join(db_dir, csv_filename_test), 'w') as f:
+    with open(os.path.join(db_dir, "datasets", csv_filename_test), 'w') as f:
         writer = csv.writer(f)
         writer.writerows(csv_content_test)
-    with open(os.path.join(db_dir, csv_filename_valid), 'w') as f:
+    with open(os.path.join(db_dir, "datasets", csv_filename_valid), 'w') as f:
         writer = csv.writer(f)
         writer.writerows(csv_content_valid)
 
@@ -88,7 +89,7 @@ def extract_sample_from_dataset(db_dir, csv_filename, output_dir_path, pos_sampl
     """
     Function that copies samples from the given dataset in order to visualize the images.
     :param db_dir: path to the root directory of the database.
-    :param csv_filename: name of the csv file contained in the database root folder.
+    :param csv_filename: name of the csv file contained in the database folder.
     :param output_dir_path: path where to save the sample of the dataset.
     :param pos_samples_nb: number of positive samples to extract.
     :param neg_samples_nb: number of negative samples to extract.
@@ -108,7 +109,7 @@ def extract_sample_from_dataset(db_dir, csv_filename, output_dir_path, pos_sampl
         os.makedirs(neg_dir_path)
 
     # Copy files
-    with open(os.path.join(db_dir, csv_filename), "r") as csv_file:
+    with open(os.path.join(db_dir, "datasets", csv_filename), "r") as csv_file:
         csv_reader = csv.reader(csv_file, delimiter=',')
         for row in tqdm.tqdm(csv_reader):
             if row[1] == "1" and pos_nb < pos_samples_nb:
