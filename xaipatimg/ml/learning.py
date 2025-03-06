@@ -1,10 +1,11 @@
 from datetime import datetime
 from os.path import join
-
+import json
 import numpy as np
 import pandas as pd
 import os
 import torch
+import tqdm
 from PIL import Image
 from torch.nn import Linear
 from torch.optim.lr_scheduler import StepLR
@@ -22,7 +23,7 @@ class PatImgDataset(torch.utils.data.Dataset):
         :param target_transform: pipeline for transforming labels
         """
         self.database_root_path = database_root_path
-        dataset_csv = pd.read_csv(os.path.join(database_root_path, csv_dataset_filename))
+        dataset_csv = pd.read_csv(os.path.join(database_root_path, "datasets", csv_dataset_filename))
         self.img_list = dataset_csv["path"]
         self.img_labels = dataset_csv["class"]
         self.transform = transform
@@ -68,9 +69,9 @@ def compute_mean_std_dataset(db_dir, dataset_filename, preprocess_no_norm):
     :return: tuple ([mean on every channel], [std on every channel])
     """
     dataset_no_norm = PatImgDataset(db_dir, dataset_filename, transform=preprocess_no_norm)
-    alldata_no_norm = np.array([dataset_no_norm[i][0] for i in range(len(dataset_no_norm))])
-    means = [np.mean(x) for x in [alldata_no_norm[:, channel, :] for channel in range(alldata_no_norm.shape[1])]]
-    stds = [np.std(x) for x in [alldata_no_norm[:, channel, :] for channel in range(alldata_no_norm.shape[1])]]
+    alldata_no_norm = np.array([dataset_no_norm[i][0] for i in tqdm.tqdm(range(len(dataset_no_norm)))])
+    means = [np.mean(x) for x in [alldata_no_norm[:, channel, :] for channel in tqdm.tqdm(range(alldata_no_norm.shape[1]))]]
+    stds = [np.std(x) for x in [alldata_no_norm[:, channel, :] for channel in tqdm.tqdm(range(alldata_no_norm.shape[1]))]]
     return means, stds
 
 
@@ -107,9 +108,9 @@ def _train_epoch(training_loader, model, optimizer, loss_fn, device, epoch_index
     return last_loss
 
 
-def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir, training_epochs=90, lr=0.1,
-                         momentum=0.9, weight_decay=1e-4, batch_size=32, lr_step_size=30, lr_gamma=0.1,
-                         train_loss_write_period_logs=100):
+def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir, device="cuda:0",
+                         training_epochs=90, lr=0.1, momentum=0.9, weight_decay=1e-4, batch_size=32, lr_step_size=30,
+                         lr_gamma=0.1, train_loss_write_period_logs=100):
     """
     Perform the training of the given model.
     The default hyper-parameters correspond to the ones that were used to train ResNet18 model. The stochastic
@@ -119,6 +120,8 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     :param db_dir: path to the root directory of the database
     :param train_dataset_filename: filename of the csv training dataset file
     :param valid_dataset_filename: filename of the csv validation dataset file
+    :param model_dir: directory to save model and tensorboard logs
+    :param device: device where the computation is done (default : cuda:0)
     :param training_epochs: number of training epochs
     :param lr: learning rate
     :param momentum: momentum
@@ -126,12 +129,10 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     :param batch_size: batch size
     :param lr_step_size: learning rate step size (Step LR scheduler)
     :param lr_gamma: learning rate gamma (Step LR scheduler)
-    :param model_dir: directory to save model and tensorboard logs
     :param train_loss_write_period_logs: period between two recordings of the training loss in the logs
     :return:
     """
     os.makedirs(model_dir, exist_ok=True)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Computing training dataset means and stds
     preprocess_no_norm = transforms.Compose([
@@ -139,6 +140,12 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
         transforms.ToTensor()
     ])
     means, stds = compute_mean_std_dataset(db_dir, train_dataset_filename, preprocess_no_norm)
+
+    # Writing training set statistics to file
+    with open(os.path.join(model_dir, "train_set_stats.json"), "w") as f:
+        json.dump({"mean": means, "std": stds}, f)
+
+    print("Train dataset statistics : " + str(means) + " " + str(stds))
 
     # Definition of complete preprocessing pipeline that includes normalization based on the training data
     preprocess = transforms.Compose([
@@ -226,5 +233,45 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
             best_vloss = avg_vloss
             best_model_path = join(model_dir, "best_model")
             torch.save(model.state_dict(), best_model_path)
+            best_model_epoch_file = join(model_dir, "best_model_epoch")
+            with open(best_model_epoch_file, "w") as f:
+                f.write(str(epoch_number + 1))
 
         epoch_number += 1
+
+def compute_resnet18_test_results(db_dir, test_dataset_filename, model_dir, device="cuda:0"):
+
+    with open(os.path.join(model_dir, "train_set_stats.json"), "r") as f:
+        stats_dict = json.load(f)
+
+    means, stds = stats_dict["means"], stats_dict["stds"]
+
+    # Definition of complete preprocessing pipeline that includes normalization based on the training data
+    preprocess = transforms.Compose([
+        transforms.Resize(256),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=means, std=stds)
+    ])
+
+    # Importing the data
+    dataset_test = PatImgDataset(db_dir, test_dataset_filename, transform=preprocess)
+    test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=100, shuffle=False)
+
+    # Creating the model
+    model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=False)
+    model.fc = Linear(in_features=512, out_features=2, bias=True)
+    model.load_state_dict(torch.load(os.path.join(model_dir, "best_model"), weights_only=True))
+    model.eval()
+    model = model.to(device)
+
+    probabilities = []
+    labels = []
+    with torch.no_grad():
+        for i, vdata in enumerate(test_loader):
+            vinputs, vlabels = vdata[0].to(device), vdata[1].to(device)
+            voutputs = model(vinputs.float())
+            probabilities.append(torch.nn.functional.softmax(voutputs, dim=1).tolist())
+            labels.append(vlabels.tolist())
+
+    print(probabilities)
+    print(labels)
