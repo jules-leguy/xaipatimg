@@ -1,1 +1,4 @@
-data/
+.idea/
+xaipatimg/__pycache__/
+xaipatimg/datagen/__pycache__/
+xaipatimg/ml/__pycache__/
