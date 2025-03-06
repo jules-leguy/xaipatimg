@@ -130,7 +130,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     :param train_loss_write_period_logs: period between two recordings of the training loss in the logs
     :return:
     """
-
+    os.makedirs(model_dir, exist_ok=True)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Computing training dataset means and stds
