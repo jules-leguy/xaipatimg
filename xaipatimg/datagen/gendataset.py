@@ -1,4 +1,4 @@
-from dbimg import load_db
+from xaipatimg.datagen.dbimg import load_db
 import numpy as np
 import csv
 import tqdm
@@ -6,15 +6,15 @@ import shutil
 import os
 from sklearn.model_selection import train_test_split
 
-def create_dataset_based_on_rule(db_dir, csv_filename_train, csv_filename_valid, csv_filename_test, test_size,
+def create_dataset_based_on_rule(db_dir, csv_filename_train, csv_filename_test, csv_filename_valid, test_size,
                                  valid_size, dataset_pos_samples_nb, dataset_neg_samples_nb, rule_fun, random_seed=42):
     """
     Function that creates a training dataset based on the rule that is defined in the rule_fun function. The dataset is
     saved as a csv file and contains a given number of positive and negative samples.
     :param db_dir: path to the root directory of the database.
     :param csv_filename_train: name of the csv file that contains the training dataset.
-    :param csv_filename_valid: name of the csv file that contains the validation dataset.
     :param csv_filename_test: name of the csv file that contains the testing dataset.
+    :param csv_filename_valid: name of the csv file that contains the validation dataset.
     :param test_size: number of samples or proportion of the data to be put in the validation set.
     :param valid_size: number of samples or proportion of the dataset to be put in the validation set (in proportion of
     the data that has not been put in the test set).
@@ -54,7 +54,7 @@ def create_dataset_based_on_rule(db_dir, csv_filename_train, csv_filename_valid,
     img_list = np.concatenate((pos_list, neg_list), axis=0)
 
     # Making sure all the data is unique before splitting it into train/test/valid sets
-    assert np.unique(img_list) == len(img_list)
+    assert len(np.unique(img_list)) == len(img_list)
 
     # Splitting training, testing and validation sets
     img_list_nontest, img_list_test, y_nontest, y_test = train_test_split(img_list, y,
