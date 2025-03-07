@@ -7,6 +7,7 @@ import os
 import torch
 import tqdm
 from PIL import Image
+from sklearn.metrics import accuracy_score, precision_score, roc_auc_score, recall_score, confusion_matrix
 from torch.nn import Linear
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.tensorboard import SummaryWriter
@@ -14,16 +15,16 @@ from torchvision.transforms import transforms
 
 
 class PatImgDataset(torch.utils.data.Dataset):
-    def __init__(self, database_root_path, csv_dataset_filename, transform=None, target_transform=None):
+    def __init__(self, db_dir, csv_dataset_filename, transform=None, target_transform=None):
         """
         Initialize the dataset object.
-        :param database_root_path: path to the root directory of the database
+        :param db_dir: path to the root directory of the database
         :param csv_dataset_filename: name of the csv dataset file
         :param transform: pipeline for transforming input data
         :param target_transform: pipeline for transforming labels
         """
-        self.database_root_path = database_root_path
-        dataset_csv = pd.read_csv(os.path.join(database_root_path, "datasets", csv_dataset_filename))
+        self.db_dir = db_dir
+        dataset_csv = pd.read_csv(os.path.join(db_dir, "datasets", csv_dataset_filename))
         self.img_list = dataset_csv["path"]
         self.img_labels = dataset_csv["class"]
         self.transform = transform
@@ -42,7 +43,7 @@ class PatImgDataset(torch.utils.data.Dataset):
         :param idx: index
         :return: X, y
         """
-        img_path = os.path.join(self.database_root_path, self.img_list[idx])
+        img_path = os.path.join(self.db_dir, self.img_list[idx])
         image = Image.open(img_path)
         label = self.img_labels[idx]
         if self.transform:
@@ -57,7 +58,7 @@ class PatImgDataset(torch.utils.data.Dataset):
         :param idx: index
         :return: path to the image
         """
-        return os.path.join(self.database_root_path, self.img_list[idx])
+        return os.path.join(self.db_dir, self.img_list[idx])
 
 
 def compute_mean_std_dataset(db_dir, dataset_filename, preprocess_no_norm):
@@ -239,7 +240,42 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
 
         epoch_number += 1
 
-def compute_resnet18_test_results(db_dir, test_dataset_filename, model_dir, device="cuda:0"):
+def _compute_scores(data_loader, model, device):
+    probabilities = []
+    labels = []
+    with torch.no_grad():
+        for i, data in enumerate(data_loader):
+            inputs, labels = data[0].to(device), data[1].to(device)
+            outputs = model(inputs.float())
+            probabilities.append(torch.nn.functional.softmax(outputs, dim=1).tolist())
+            labels.append(labels.tolist())
+
+    y_pred = np.round(probabilities).astype(int)
+    tn, fp, fn, tp = confusion_matrix(y_pred, labels).ravel()
+
+    return {
+        "accuracy": accuracy_score(labels, y_pred),
+        "precision": precision_score(labels, y_pred),
+        "recall": recall_score(labels, y_pred),
+        "roc_auc": roc_auc_score(labels, probabilities),
+        "confusion matrix": {
+            "TN": tn, "FP": fp, "FN": fn, "TP": tp
+        }
+    }
+
+def compute_resnet18_model_scores(db_dir, train_dataset_filename, test_dataset_filename, valid_dataset_filename,
+                                  model_dir, device="cuda:0"):
+    """
+    Computes and writes the scores of the given model into a file in the model directory. The scores are evaluated
+    on the training, validation and test sets.
+    :param db_dir: path to the directory of the database.
+    :param train_dataset_filename: filename of the csv training dataset file.
+    :param test_dataset_filename: filename of the csv test dataset file.
+    :param valid_dataset_filename: filename of the csv validation dataset file.
+    :param model_dir: path to the directory of the model.
+    :param device: device where to perform the computations.
+    :return:
+    """
 
     with open(os.path.join(model_dir, "train_set_stats.json"), "r") as f:
         stats_dict = json.load(f)
@@ -254,8 +290,12 @@ def compute_resnet18_test_results(db_dir, test_dataset_filename, model_dir, devi
     ])
 
     # Importing the data
+    dataset_train = PatImgDataset(db_dir, train_dataset_filename, transform=preprocess)
     dataset_test = PatImgDataset(db_dir, test_dataset_filename, transform=preprocess)
+    dataset_valid = PatImgDataset(db_dir, valid_dataset_filename, transform=preprocess)
+    train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=100, shuffle=False)
     test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=100, shuffle=False)
+    valid_loader = torch.utils.data.DataLoader(dataset_valid, batch_size=100, shuffle=False)
 
     # Creating the model
     model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=False)
@@ -264,14 +304,16 @@ def compute_resnet18_test_results(db_dir, test_dataset_filename, model_dir, devi
     model.eval()
     model = model.to(device)
 
-    probabilities = []
-    labels = []
-    with torch.no_grad():
-        for i, vdata in enumerate(test_loader):
-            vinputs, vlabels = vdata[0].to(device), vdata[1].to(device)
-            voutputs = model(vinputs.float())
-            probabilities.append(torch.nn.functional.softmax(voutputs, dim=1).tolist())
-            labels.append(vlabels.tolist())
+    # Computing the scores
+    results = {
+        "train" : _compute_scores(train_loader, model, device),
+        "test" : _compute_scores(test_loader, model, device),
+        "valid" : _compute_scores(valid_loader, model, device)
+    }
 
-    print(probabilities)
-    print(labels)
+    # Writing the results
+    with open(join(model_dir, "results.json"), "w") as f:
+        json.dump(results, f)
+
+    print(results)
+    return results
