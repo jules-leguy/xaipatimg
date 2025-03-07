@@ -70,8 +70,8 @@ def compute_mean_std_dataset(db_dir, dataset_filename, preprocess_no_norm):
     """
     dataset_no_norm = PatImgDataset(db_dir, dataset_filename, transform=preprocess_no_norm)
     alldata_no_norm = np.array([dataset_no_norm[i][0] for i in tqdm.tqdm(range(len(dataset_no_norm)))])
-    means = [np.mean(x) for x in [alldata_no_norm[:, channel, :] for channel in tqdm.tqdm(range(alldata_no_norm.shape[1]))]]
-    stds = [np.std(x) for x in [alldata_no_norm[:, channel, :] for channel in tqdm.tqdm(range(alldata_no_norm.shape[1]))]]
+    means = [np.mean(x).astype(float) for x in [alldata_no_norm[:, channel, :] for channel in range(alldata_no_norm.shape[1])]]
+    stds = [np.std(x).astype(float) for x in [alldata_no_norm[:, channel, :] for channel in range(alldata_no_norm.shape[1])]]
     return means, stds
 
 
