@@ -29,6 +29,10 @@ class PatImgDataset(torch.utils.data.Dataset):
         self.img_labels = dataset_csv["class"]
         self.transform = transform
         self.target_transform = target_transform
+        self.images_cache = []
+        for idx in range(len(self.img_list)):
+            img_path = os.path.join(self.db_dir, self.img_list[idx])
+            self.images_cache.append(Image.open(img_path))
 
     def __len__(self):
         """
@@ -43,8 +47,7 @@ class PatImgDataset(torch.utils.data.Dataset):
         :param idx: index
         :return: X, y
         """
-        img_path = os.path.join(self.db_dir, self.img_list[idx])
-        image = Image.open(img_path)
+        image = self.images_cache[idx]
         label = self.img_labels[idx]
         if self.transform:
             image = self.transform(image)
