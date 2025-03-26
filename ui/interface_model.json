@@ -3,7 +3,8 @@
     "view_expl_protocole_md": "This is a text in markdown to explain the protocol to the operators.",
     "experiments": [
       {
-        "rule" : "Description of the rule",
+        "rule_fulldesc_md" : "Full description of the rule in markdown (contains images) to be printed in a dedicated view",
+        "rule_shortdesc" : "Short description of the rule",
         "exp_type" : "op|opmodel|opmodelxai",
         "items": [
             {
