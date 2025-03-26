@@ -1,0 +1,25 @@
+{
+  "operator1": {
+    "view_expl_protocole_md": "This is a text in markdown to explain the protocol to the operators.",
+    "experiments": [
+      {
+        "rule" : "Description of the rule",
+        "exp_type" : "op|opmodel|opmodelxai",
+        "items": [
+            {
+                "card": "images/...",
+                "y_pred": "True",
+                "y_true": "True",
+                "expl": "images/..."
+            },
+            {
+                "card": "images/...",
+                "y_pred": "False",
+                "y_true": "False",
+                "expl": "images/..."
+            }
+        ]
+      }
+    ]
+  }
+}
