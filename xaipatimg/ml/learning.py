@@ -29,6 +29,10 @@ class PatImgDataset(torch.utils.data.Dataset):
         self.img_labels = dataset_csv["class"]
         self.transform = transform
         self.target_transform = target_transform
+        self.images_cache = []
+        for idx in range(len(self.img_list)):
+            img_path = os.path.join(self.db_dir, self.img_list[idx])
+            self.images_cache.append(Image.open(img_path))
 
     def __len__(self):
         """
@@ -43,8 +47,7 @@ class PatImgDataset(torch.utils.data.Dataset):
         :param idx: index
         :return: X, y
         """
-        img_path = os.path.join(self.db_dir, self.img_list[idx])
-        image = Image.open(img_path)
+        image = self.images_cache[idx]
         label = self.img_labels[idx]
         if self.transform:
             image = self.transform(image)
@@ -71,8 +74,8 @@ def compute_mean_std_dataset(db_dir, dataset_filename, preprocess_no_norm):
     """
     dataset_no_norm = PatImgDataset(db_dir, dataset_filename, transform=preprocess_no_norm)
     alldata_no_norm = np.array([dataset_no_norm[i][0] for i in tqdm.tqdm(range(len(dataset_no_norm)))])
-    means = [np.mean(x) for x in [alldata_no_norm[:, channel, :] for channel in tqdm.tqdm(range(alldata_no_norm.shape[1]))]]
-    stds = [np.std(x) for x in [alldata_no_norm[:, channel, :] for channel in tqdm.tqdm(range(alldata_no_norm.shape[1]))]]
+    means = [np.mean(x).astype(float) for x in [alldata_no_norm[:, channel, :] for channel in tqdm.tqdm(range(alldata_no_norm.shape[1]))]]
+    stds = [np.std(x).astype(float) for x in [alldata_no_norm[:, channel, :] for channel in tqdm.tqdm(range(alldata_no_norm.shape[1]))]]
     return means, stds
 
 
@@ -141,12 +144,11 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
         transforms.ToTensor()
     ])
     means, stds = compute_mean_std_dataset(db_dir, train_dataset_filename, preprocess_no_norm)
+    print("Train dataset statistics : " + str(means) + " " + str(stds))
 
     # Writing training set statistics to file
     with open(os.path.join(model_dir, "train_set_stats.json"), "w") as f:
         json.dump({"mean": means, "std": stds}, f)
-
-    print("Train dataset statistics : " + str(means) + " " + str(stds))
 
     # Definition of complete preprocessing pipeline that includes normalization based on the training data
     preprocess = transforms.Compose([
@@ -242,24 +244,23 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
 
 def _compute_scores(data_loader, model, device):
     probabilities = []
-    labels = []
+    y_true = []
     with torch.no_grad():
         for i, data in enumerate(data_loader):
             inputs, labels = data[0].to(device), data[1].to(device)
             outputs = model(inputs.float())
-            probabilities.append(torch.nn.functional.softmax(outputs, dim=1).tolist())
-            labels.append(labels.tolist())
-
+            probabilities.extend(torch.nn.functional.softmax(outputs, dim=1).cpu().numpy().reshape(-1, 2).T[1].tolist())
+            y_true.extend(labels.cpu().numpy().reshape(-1,))
     y_pred = np.round(probabilities).astype(int)
-    tn, fp, fn, tp = confusion_matrix(y_pred, labels).ravel()
 
+    tn, fp, fn, tp = confusion_matrix(y_pred, y_true).ravel()
     return {
-        "accuracy": accuracy_score(labels, y_pred),
-        "precision": precision_score(labels, y_pred),
-        "recall": recall_score(labels, y_pred),
-        "roc_auc": roc_auc_score(labels, probabilities),
+        "accuracy": accuracy_score(y_true, y_pred),
+        "precision": precision_score(y_true, y_pred),
+        "recall": recall_score(y_true, y_pred),
+        "roc_auc": float(roc_auc_score(y_true, probabilities)),
         "confusion matrix": {
-            "TN": tn, "FP": fp, "FN": fn, "TP": tp
+            "TN": int(tn), "FP": int(fp), "FN": int(fn), "TP": int(tp)
         }
     }
 
@@ -280,7 +281,7 @@ def compute_resnet18_model_scores(db_dir, train_dataset_filename, test_dataset_f
     with open(os.path.join(model_dir, "train_set_stats.json"), "r") as f:
         stats_dict = json.load(f)
 
-    means, stds = stats_dict["means"], stats_dict["stds"]
+    means, stds = stats_dict["mean"], stats_dict["std"]
 
     # Definition of complete preprocessing pipeline that includes normalization based on the training data
     preprocess = transforms.Compose([

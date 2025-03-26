@@ -114,6 +114,7 @@ csv_name_valid = "contains_square_valid.csv"
 
 create_dataset_based_on_rule(db_dir,          # path to the directory that contains the DB
                              csv_name_train,  # name of the csv file that contains the training dataset
+                             csv_name_train,  # name of the csv file that contains the training dataset
                              csv_name_valid,  # name of the csv file that contains the validation dataset
                              valid_size=0.2,  # proportion or number of samples in the validation dataset    
                              dataset_pos_samples_nb=10000,
