@@ -2,10 +2,10 @@
 import os
 
 db_dir = os.environ["DATA"] + "PatImgXAI_data/db0.1.3/"
-train_dataset_filename = "twiceasmanyredasblue_train.csv"
-test_dataset_filename = "twiceasmanyredasblue_test.csv"
-valid_dataset_filename = "twiceasmanyredasblue_valid.csv"
-model_dir = os.environ["DATA"] + "models/db_v0.1.3/twiceasmanyredasblue_model/"
+train_dataset_filename = "twiceasmanytrianglesascircles_train.csv"
+test_dataset_filename = "twiceasmanytrianglesascircles_test.csv"
+valid_dataset_filename = "twiceasmanytrianglesascircles_valid.csv"
+model_dir = os.environ["DATA"] + "models/db_v0.1.3/twiceasmanytrianglesascircles_model/"
 
 device = "cuda:1"
 #%%

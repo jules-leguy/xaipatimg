@@ -13,15 +13,18 @@ from torch.optim.lr_scheduler import StepLR
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import transforms
 
+from xaipatimg.ml import resnet18_preprocess_no_norm
+
 
 class PatImgDataset(torch.utils.data.Dataset):
-    def __init__(self, db_dir, csv_dataset_filename, transform=None, target_transform=None):
+    def __init__(self, db_dir, csv_dataset_filename, transform=None, target_transform=None, max_size=None):
         """
         Initialize the dataset object.
         :param db_dir: path to the root directory of the database
         :param csv_dataset_filename: name of the csv dataset file
         :param transform: pipeline for transforming input data
         :param target_transform: pipeline for transforming labels
+        :param max_size: if not None, the maximum number of images to load
         """
         self.db_dir = db_dir
         dataset_csv = pd.read_csv(os.path.join(db_dir, "datasets", csv_dataset_filename))
@@ -30,9 +33,18 @@ class PatImgDataset(torch.utils.data.Dataset):
         self.transform = transform
         self.target_transform = target_transform
         self.images_cache = []
-        for idx in range(len(self.img_list)):
+
+        if max_size is not None:
+            self.img_list = self.img_list[:max_size]
+            self.img_labels = self.img_labels[:max_size]
+
+        print("Loading dataset content for " + csv_dataset_filename)
+        for idx in tqdm.tqdm(range(len(self.img_list))):
             img_path = os.path.join(self.db_dir, self.img_list[idx])
-            self.images_cache.append(Image.open(img_path))
+            image = Image.open(img_path)
+            if self.transform is not None:
+                image = self.transform(image)
+            self.images_cache.append(image)
 
     def __len__(self):
         """
@@ -49,8 +61,6 @@ class PatImgDataset(torch.utils.data.Dataset):
         """
         image = self.images_cache[idx]
         label = self.img_labels[idx]
-        if self.transform:
-            image = self.transform(image)
         if self.target_transform:
             label = self.target_transform(label)
         return image, label
@@ -73,9 +83,11 @@ def compute_mean_std_dataset(db_dir, dataset_filename, preprocess_no_norm):
     :return: tuple ([mean on every channel], [std on every channel])
     """
     dataset_no_norm = PatImgDataset(db_dir, dataset_filename, transform=preprocess_no_norm)
-    alldata_no_norm = np.array([dataset_no_norm[i][0] for i in tqdm.tqdm(range(len(dataset_no_norm)))])
-    means = [np.mean(x).astype(float) for x in [alldata_no_norm[:, channel, :] for channel in tqdm.tqdm(range(alldata_no_norm.shape[1]))]]
-    stds = [np.std(x).astype(float) for x in [alldata_no_norm[:, channel, :] for channel in tqdm.tqdm(range(alldata_no_norm.shape[1]))]]
+    alldata_no_norm = np.array([dataset_no_norm[i][0] for i in range(len(dataset_no_norm))])
+    means = [np.mean(x).astype(float) for x in
+             [alldata_no_norm[:, channel, :] for channel in range(alldata_no_norm.shape[1])]]
+    stds = [np.std(x).astype(float) for x in
+            [alldata_no_norm[:, channel, :] for channel in range(alldata_no_norm.shape[1])]]
     return means, stds
 
 
@@ -139,11 +151,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     os.makedirs(model_dir, exist_ok=True)
 
     # Computing training dataset means and stds
-    preprocess_no_norm = transforms.Compose([
-        transforms.Resize(256),
-        transforms.ToTensor()
-    ])
-    means, stds = compute_mean_std_dataset(db_dir, train_dataset_filename, preprocess_no_norm)
+    means, stds = compute_mean_std_dataset(db_dir, train_dataset_filename, resnet18_preprocess_no_norm)
     print("Train dataset statistics : " + str(means) + " " + str(stds))
 
     # Writing training set statistics to file
@@ -242,27 +250,80 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
 
         epoch_number += 1
 
-def _compute_scores(data_loader, model, device):
-    probabilities = []
-    y_true = []
+def make_prediction(model, X, device):
+    """
+    Getting the prediction for the given model and the given transformed input tensor.
+    :param model: model.
+    :param X: transformed input tensor.
+    :param device: device where to perform the computation.
+    :return:
+    """
     with torch.no_grad():
-        for i, data in enumerate(data_loader):
-            inputs, labels = data[0].to(device), data[1].to(device)
-            outputs = model(inputs.float())
-            probabilities.extend(torch.nn.functional.softmax(outputs, dim=1).cpu().numpy().reshape(-1, 2).T[1].tolist())
-            y_true.extend(labels.cpu().numpy().reshape(-1,))
+        outputs = model(X.to(device).float())
+        probabilities = torch.nn.functional.softmax(outputs, dim=1).cpu().numpy().reshape(-1, 2).T[1].tolist()
     y_pred = np.round(probabilities).astype(int)
+    return y_pred, probabilities
 
-    tn, fp, fn, tp = confusion_matrix(y_pred, y_true).ravel()
+def _compute_scores(data_loader, model, device):
+    probabilities_all = []
+    y_true_all = []
+    y_pred_all = []
+    for i, data in enumerate(data_loader):
+        y_pred, probs = make_prediction(model, data[0], device)
+        y_pred_all.extend(y_pred)
+        probabilities_all.extend(probs)
+        y_true_all.extend(data[1].numpy().reshape(-1,))
+
+    tn, fp, fn, tp = confusion_matrix(y_pred_all, y_true_all).ravel()
     return {
-        "accuracy": accuracy_score(y_true, y_pred),
-        "precision": precision_score(y_true, y_pred),
-        "recall": recall_score(y_true, y_pred),
-        "roc_auc": float(roc_auc_score(y_true, probabilities)),
+        "accuracy": accuracy_score(y_true_all, y_pred_all),
+        "precision": precision_score(y_true_all, y_pred_all),
+        "recall": recall_score(y_true_all, y_pred_all),
+        "roc_auc": float(roc_auc_score(y_true_all, probabilities_all)),
         "confusion matrix": {
             "TN": int(tn), "FP": int(fp), "FN": int(fn), "TP": int(tp)
         }
     }
+
+def load_resnet18_based_model(model_dir, device):
+    """
+    Creating a resnet18 model with two output features and loading the weights from the model stored in the given
+    directory.
+    :param model_dir: path to model directory (contains a file called best_model).
+    :param device: device on which to run the model.
+    :return: the model.
+    """
+    model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=False)
+    model.fc = Linear(in_features=512, out_features=2, bias=True)
+    model.load_state_dict(torch.load(os.path.join(model_dir, "best_model"), weights_only=True))
+    model.eval()
+    return model.to(device)
+
+def get_dataset_transformed(db_dir, model_dir, dataset_filename, max_size=None):
+    """
+    Return a PatImgDataset instance for the given dataset, with a transformation that includes normalization of the data
+    according to the values observed on the training dataset of the given model.
+    :param db_dir: path to the directory that contains the database.
+    :param model_dir: path to the directory that contains the model.
+    :param dataset_filename: name of the dataset to load.
+    :param max_size: maximum size of the dataset to load.
+    :return: PatImgDataset instance
+    """
+
+    with open(os.path.join(model_dir, "train_set_stats.json"), "r") as f:
+        stats_dict = json.load(f)
+
+    means, stds = stats_dict["mean"], stats_dict["std"]
+
+    # Definition of complete preprocessing pipeline that includes normalization based on the training data
+    preprocess = transforms.Compose([
+        transforms.Resize(256),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=means, std=stds)
+    ])
+
+    return PatImgDataset(db_dir, dataset_filename, transform=preprocess, max_size=max_size)
+
 
 def compute_resnet18_model_scores(db_dir, train_dataset_filename, test_dataset_filename, valid_dataset_filename,
                                   model_dir, device="cuda:0"):
@@ -278,38 +339,22 @@ def compute_resnet18_model_scores(db_dir, train_dataset_filename, test_dataset_f
     :return:
     """
 
-    with open(os.path.join(model_dir, "train_set_stats.json"), "r") as f:
-        stats_dict = json.load(f)
-
-    means, stds = stats_dict["mean"], stats_dict["std"]
-
-    # Definition of complete preprocessing pipeline that includes normalization based on the training data
-    preprocess = transforms.Compose([
-        transforms.Resize(256),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=means, std=stds)
-    ])
-
     # Importing the data
-    dataset_train = PatImgDataset(db_dir, train_dataset_filename, transform=preprocess)
-    dataset_test = PatImgDataset(db_dir, test_dataset_filename, transform=preprocess)
-    dataset_valid = PatImgDataset(db_dir, valid_dataset_filename, transform=preprocess)
+    dataset_train = get_dataset_transformed(db_dir, model_dir, train_dataset_filename)
+    dataset_test = get_dataset_transformed(db_dir, model_dir, test_dataset_filename)
+    dataset_valid = get_dataset_transformed(db_dir, model_dir, valid_dataset_filename)
     train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=100, shuffle=False)
     test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=100, shuffle=False)
     valid_loader = torch.utils.data.DataLoader(dataset_valid, batch_size=100, shuffle=False)
 
-    # Creating the model
-    model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=False)
-    model.fc = Linear(in_features=512, out_features=2, bias=True)
-    model.load_state_dict(torch.load(os.path.join(model_dir, "best_model"), weights_only=True))
-    model.eval()
-    model = model.to(device)
+    # Loading the model
+    model = load_resnet18_based_model(model_dir, device)
 
     # Computing the scores
     results = {
-        "train" : _compute_scores(train_loader, model, device),
-        "test" : _compute_scores(test_loader, model, device),
-        "valid" : _compute_scores(valid_loader, model, device)
+        "train": _compute_scores(train_loader, model, device),
+        "test": _compute_scores(test_loader, model, device),
+        "valid": _compute_scores(valid_loader, model, device)
     }
 
     # Writing the results

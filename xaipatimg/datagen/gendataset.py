@@ -38,19 +38,24 @@ def create_dataset_based_on_rule(db_dir, csv_filename_train, csv_filename_test, 
     # Extracting positive and negative samples
     for img_content in tqdm.tqdm(img_content_list):
         is_positive = rule_fun(img_content["content"])
-        if is_positive and pos_nb < dataset_pos_samples_nb:
-            pos_list.append(img_content["path"])
+        if is_positive:
+            if pos_nb < dataset_pos_samples_nb:
+                pos_list.append(img_content["path"])
             pos_nb += 1
-        elif not is_positive and neg_nb < dataset_neg_samples_nb:
-            neg_list.append(img_content["path"])
+        else:
+            if neg_nb < dataset_neg_samples_nb:
+                neg_list.append(img_content["path"])
             neg_nb += 1
 
-    if pos_nb != dataset_pos_samples_nb or neg_nb != dataset_neg_samples_nb:
+    print("Total number of positive instances found in database : " + str(pos_nb))
+    print("Total number of negative instances found in database : " + str(neg_nb))
+
+    if len(pos_list) != dataset_pos_samples_nb or len(neg_list) != dataset_neg_samples_nb:
         raise RuntimeError("Could not extract enough positive (" + str(pos_nb) + "/" + str(dataset_pos_samples_nb) +
                            ") or negative (" + str(neg_nb) + "/" + str(dataset_neg_samples_nb) +") samples.")
 
     # Forming dataset content
-    y = np.concatenate((np.full(pos_nb, 1), np.full(neg_nb, 0)), axis=0)
+    y = np.concatenate((np.full(len(pos_list), 1), np.full(len(neg_list), 0)), axis=0)
     img_list = np.concatenate((pos_list, neg_list), axis=0)
 
     # Making sure all the data is unique before splitting it into train/test/valid sets
