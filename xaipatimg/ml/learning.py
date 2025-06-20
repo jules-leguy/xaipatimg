@@ -27,7 +27,8 @@ class PatImgDataset(torch.utils.data.Dataset):
         :param max_size: if not None, the maximum number of images to load
         """
         self.db_dir = db_dir
-        dataset_csv = pd.read_csv(os.path.join(db_dir, "datasets", csv_dataset_filename))
+        dataset_csv = pd.read_csv(os.path.join(
+            db_dir, "datasets", csv_dataset_filename))
         self.img_list = dataset_csv["path"]
         self.img_labels = dataset_csv["class"]
         self.transform = transform
@@ -82,8 +83,10 @@ def compute_mean_std_dataset(db_dir, dataset_filename, preprocess_no_norm):
     :param preprocess_no_norm: preprocessing pipeline without normalization
     :return: tuple ([mean on every channel], [std on every channel])
     """
-    dataset_no_norm = PatImgDataset(db_dir, dataset_filename, transform=preprocess_no_norm)
-    alldata_no_norm = np.array([dataset_no_norm[i][0] for i in range(len(dataset_no_norm))])
+    dataset_no_norm = PatImgDataset(
+        db_dir, dataset_filename, transform=preprocess_no_norm)
+    alldata_no_norm = np.array([dataset_no_norm[i][0]
+                               for i in range(len(dataset_no_norm))])
     means = [np.mean(x).astype(float) for x in
              [alldata_no_norm[:, channel, :] for channel in range(alldata_no_norm.shape[1])]]
     stds = [np.std(x).astype(float) for x in
@@ -126,7 +129,7 @@ def _train_epoch(training_loader, model, optimizer, loss_fn, device, epoch_index
 
 def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir, device="cuda:0",
                          training_epochs=90, lr=0.1, momentum=0.9, weight_decay=1e-4, batch_size=32, lr_step_size=30,
-                         lr_gamma=0.1, train_loss_write_period_logs=100, target_accuracy = 0.8):
+                         lr_gamma=0.1, train_loss_write_period_logs=100, target_accuracy=0.8):
     """
     Perform the training of the given model.
     The default hyper-parameters correspond to the ones that were used to train ResNet18 model. The stochastic
@@ -151,7 +154,8 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     os.makedirs(model_dir, exist_ok=True)
 
     # Computing training dataset means and stds
-    means, stds = compute_mean_std_dataset(db_dir, train_dataset_filename, resnet18_preprocess_no_norm)
+    means, stds = compute_mean_std_dataset(
+        db_dir, train_dataset_filename, resnet18_preprocess_no_norm)
     print("Train dataset statistics : " + str(means) + " " + str(stds))
 
     # Writing training set statistics to file
@@ -166,13 +170,18 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     ])
 
     # Importing the data
-    dataset_train = PatImgDataset(db_dir, train_dataset_filename, transform=preprocess)
-    dataset_valid = PatImgDataset(db_dir, valid_dataset_filename, transform=preprocess)
-    training_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
-    valid_loader = torch.utils.data.DataLoader(dataset_valid, batch_size=batch_size, shuffle=False)
+    dataset_train = PatImgDataset(
+        db_dir, train_dataset_filename, transform=preprocess)
+    dataset_valid = PatImgDataset(
+        db_dir, valid_dataset_filename, transform=preprocess)
+    training_loader = torch.utils.data.DataLoader(
+        dataset_train, batch_size=batch_size, shuffle=True)
+    valid_loader = torch.utils.data.DataLoader(
+        dataset_valid, batch_size=batch_size, shuffle=False)
 
     # Creating the model
-    model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=False)
+    model = torch.hub.load('pytorch/vision:v0.10.0',
+                           'resnet18', pretrained=False)
     model.fc = Linear(in_features=512, out_features=2, bias=True)
     model = model.to(device)
 
@@ -240,7 +249,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
                            {'Validation': vaccuracy},
                            epoch_number + 1)
         writer.flush()
-        
+
         # accuracy threshold
         if vaccuracy >= target_accuracy:
             cap_path = join(model_dir,
@@ -267,6 +276,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
 
         epoch_number += 1
 
+
 def make_prediction(model, X, device):
     """
     Getting the prediction for the given model and the given transformed input tensor.
@@ -277,9 +287,11 @@ def make_prediction(model, X, device):
     """
     with torch.no_grad():
         outputs = model(X.to(device).float())
-        probabilities = torch.nn.functional.softmax(outputs, dim=1).cpu().numpy().reshape(-1, 2).T[1].tolist()
+        probabilities = torch.nn.functional.softmax(
+            outputs, dim=1).cpu().numpy().reshape(-1, 2).T[1].tolist()
     y_pred = np.round(probabilities).astype(int)
     return y_pred, probabilities
+
 
 def _compute_scores(data_loader, model, device):
     probabilities_all = []
@@ -302,6 +314,7 @@ def _compute_scores(data_loader, model, device):
         }
     }
 
+
 def load_resnet18_based_model(model_dir, device):
     """
     Creating a resnet18 model with two output features and loading the weights from the model stored in the given
@@ -310,12 +323,20 @@ def load_resnet18_based_model(model_dir, device):
     :param device: device on which to run the model.
     :return: the model.
     """
-    model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=False)
+    model = torch.hub.load('pytorch/vision:v0.10.0',
+                           'resnet18', pretrained=False)
     model.fc = Linear(in_features=512, out_features=2, bias=True)
+    #add conditions for when the model does not reached 80% in accuracy
+    checkpoint = "model_at_80" if os.path.exists(os.path.join(model_dir, "model_at_80")) \
+        else "best_model"
+
+    model.load_state_dict(torch.load(os.path.join(model_dir, checkpoint), weights_only=True))
     # model.load_state_dict(torch.load(os.path.join(model_dir, "best_model"), weights_only=True))
-    model.load_state_dict(torch.load(os.path.join(model_dir, "model_at_80"), weights_only=True))
+    model.load_state_dict(torch.load(os.path.join(
+        model_dir, "model_at_80"), weights_only=True))
     model.eval()
     return model.to(device)
+
 
 def get_dataset_transformed(db_dir, model_dir, dataset_filename, max_size=None):
     """
@@ -358,12 +379,18 @@ def compute_resnet18_model_scores(db_dir, train_dataset_filename, test_dataset_f
     """
 
     # Importing the data
-    dataset_train = get_dataset_transformed(db_dir, model_dir, train_dataset_filename)
-    dataset_test = get_dataset_transformed(db_dir, model_dir, test_dataset_filename)
-    dataset_valid = get_dataset_transformed(db_dir, model_dir, valid_dataset_filename)
-    train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=100, shuffle=False)
-    test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=100, shuffle=False)
-    valid_loader = torch.utils.data.DataLoader(dataset_valid, batch_size=100, shuffle=False)
+    dataset_train = get_dataset_transformed(
+        db_dir, model_dir, train_dataset_filename)
+    dataset_test = get_dataset_transformed(
+        db_dir, model_dir, test_dataset_filename)
+    dataset_valid = get_dataset_transformed(
+        db_dir, model_dir, valid_dataset_filename)
+    train_loader = torch.utils.data.DataLoader(
+        dataset_train, batch_size=100, shuffle=False)
+    test_loader = torch.utils.data.DataLoader(
+        dataset_test, batch_size=100, shuffle=False)
+    valid_loader = torch.utils.data.DataLoader(
+        dataset_valid, batch_size=100, shuffle=False)
 
     # Loading the model
     model = load_resnet18_based_model(model_dir, device)
