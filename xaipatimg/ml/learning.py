@@ -126,7 +126,7 @@ def _train_epoch(training_loader, model, optimizer, loss_fn, device, epoch_index
 
 def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir, device="cuda:0",
                          training_epochs=90, lr=0.1, momentum=0.9, weight_decay=1e-4, batch_size=32, lr_step_size=30,
-                         lr_gamma=0.1, train_loss_write_period_logs=100):
+                         lr_gamma=0.1, train_loss_write_period_logs=100, target_accuracy = 0.8):
     """
     Perform the training of the given model.
     The default hyper-parameters correspond to the ones that were used to train ResNet18 model. The stochastic
@@ -194,6 +194,8 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     epoch_number = 0
     vaccuracies = []
     best_vloss = np.inf
+    patience = 10
+    counter = 0
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     writer = SummaryWriter(join(model_dir, "run/") + '_{}'.format(timestamp))
 
@@ -238,6 +240,15 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
                            {'Validation': vaccuracy},
                            epoch_number + 1)
         writer.flush()
+        
+        # accuracy threshold
+        if vaccuracy >= target_accuracy:
+            cap_path = join(model_dir,
+                            f"model_at_{int(target_accuracy * 100)}")
+            torch.save(model.state_dict(), cap_path)
+            print(f"  Accuracy cap reached: {vaccuracy:.3f} ≥ {target_accuracy:.2f} "
+                  f"→ saved '{cap_path}' and stopped training.")
+            break
 
         # Track best performance, and save the model's state
         if avg_vloss < best_vloss:
@@ -247,6 +258,12 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
             best_model_epoch_file = join(model_dir, "best_model_epoch")
             with open(best_model_epoch_file, "w") as f:
                 f.write(str(epoch_number + 1))
+            counter = 0
+        else:
+            counter += 1
+            if counter >= patience:
+                print("Early stopping")
+                break
 
         epoch_number += 1
 
@@ -295,7 +312,8 @@ def load_resnet18_based_model(model_dir, device):
     """
     model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=False)
     model.fc = Linear(in_features=512, out_features=2, bias=True)
-    model.load_state_dict(torch.load(os.path.join(model_dir, "best_model"), weights_only=True))
+    # model.load_state_dict(torch.load(os.path.join(model_dir, "best_model"), weights_only=True))
+    model.load_state_dict(torch.load(os.path.join(model_dir, "model_at_80"), weights_only=True))
     model.eval()
     return model.to(device)
 
