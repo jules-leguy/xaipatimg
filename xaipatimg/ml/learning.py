@@ -423,12 +423,10 @@ def save_classification(db_dir, test_dataset_filename, model_dir, classification
     :param classification_dir: path to the root directory of the classified image
     :param max_items: maximum number of items to copy.
     """
-
-    # Decide output folder
-    if classification_dir is None:
-        # "bluediagonal_test" → "bluediagonal"
-        split_name = Path(test_dataset_filename).stem.rsplit("_", 1)[0]
-        classification_dir = os.path.join(classification_dir, split_name)
+    
+    # "bluediagonal_test" → "bluediagonal"
+    split_name = Path(test_dataset_filename).stem.rsplit("_", 1)[0]
+    classification_dir = os.path.join(classification_dir, split_name)
 
     # makes TP / TN / FP / FN sub-folders
     from xaipatimg.ml.xai import _create_dirs, _get_subfolder
