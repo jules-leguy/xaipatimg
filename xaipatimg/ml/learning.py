@@ -6,7 +6,9 @@ import pandas as pd
 import os
 import torch
 import tqdm
+import shutil
 from PIL import Image
+from pathlib import Path
 from sklearn.metrics import accuracy_score, precision_score, roc_auc_score, recall_score, confusion_matrix
 from torch.nn import Linear
 from torch.optim.lr_scheduler import StepLR
@@ -14,6 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import transforms
 
 from xaipatimg.ml import resnet18_preprocess_no_norm
+from xaipatimg.ml.xai import _create_dirs, _get_subfolder
 
 
 class PatImgDataset(torch.utils.data.Dataset):
@@ -326,11 +329,12 @@ def load_resnet18_based_model(model_dir, device):
     model = torch.hub.load('pytorch/vision:v0.10.0',
                            'resnet18', pretrained=False)
     model.fc = Linear(in_features=512, out_features=2, bias=True)
-    #add conditions for when the model does not reached 80% in accuracy
+    # add conditions for when the model does not reached 80% in accuracy
     checkpoint = "model_at_80" if os.path.exists(os.path.join(model_dir, "model_at_80")) \
         else "best_model"
 
-    model.load_state_dict(torch.load(os.path.join(model_dir, checkpoint), weights_only=True))
+    model.load_state_dict(torch.load(os.path.join(
+        model_dir, checkpoint), weights_only=True))
     # model.load_state_dict(torch.load(os.path.join(model_dir, "best_model"), weights_only=True))
     model.load_state_dict(torch.load(os.path.join(
         model_dir, "model_at_80"), weights_only=True))
@@ -408,3 +412,51 @@ def compute_resnet18_model_scores(db_dir, train_dataset_filename, test_dataset_f
 
     print(results)
     return results
+
+
+def save_classification(db_dir, test_dataset_filename, model_dir, classification_dir, device="cuda:0", max_items=None):
+    """
+    Copy every image listed in test dataset into TP / TN / FP / FN folders to observer what the model got right or wrong.
+    :param db_dir: path to the root directory of the database.
+    :param test_dataset_filename: filename of the csv test dataset file.
+    :param model_dir: path to the directory of the model.
+    :param classification_dir: path to the root directory of the classified image
+    :param max_items: maximum number of items to copy.
+    """
+
+    # Decide output folder
+    if classification_dir is None:
+        # "bluediagonal_test" → "bluediagonal"
+        split_name = Path(test_dataset_filename).stem.rsplit("_", 1)[0]
+        classification_dir = os.path.join(classification_dir, split_name)
+
+    # makes TP / TN / FP / FN sub-folders
+    _create_dirs(classification_dir)
+
+    # Load model and dataset
+    model = load_resnet18_based_model(model_dir, device)
+    model.eval()
+
+    dataset = get_dataset_transformed(
+        db_dir=db_dir,
+        model_dir=model_dir,
+        dataset_filename=test_dataset_filename,
+        max_size=max_items,
+    )
+
+    # Run inference & copy originals
+    for idx in range(len(dataset)):
+        img, true_label = dataset[idx]
+
+        pred_label, _ = make_prediction(model, img.unsqueeze(0), device)
+        pred_label = int(pred_label[0])
+
+        subfolder = _get_subfolder(pred_label, true_label)
+        if subfolder is None:  # guard against unexpected labels
+            raise ValueError(
+                f"Unsupported label pair: pred={pred_label}, true={true_label}")
+
+        source = dataset.get_path(idx)
+        output = os.path.join(classification_dir,
+                              subfolder, os.path.basename(source))
+        shutil.copy2(source, output)
