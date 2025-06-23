@@ -16,7 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import transforms
 
 from xaipatimg.ml import resnet18_preprocess_no_norm
-from xaipatimg.ml.xai import _create_dirs, _get_subfolder
+
 
 
 class PatImgDataset(torch.utils.data.Dataset):
@@ -431,6 +431,7 @@ def save_classification(db_dir, test_dataset_filename, model_dir, classification
         classification_dir = os.path.join(classification_dir, split_name)
 
     # makes TP / TN / FP / FN sub-folders
+    from xaipatimg.ml.xai import _create_dirs, _get_subfolder
     _create_dirs(classification_dir)
 
     # Load model and dataset
