@@ -132,7 +132,7 @@ def _train_epoch(training_loader, model, optimizer, loss_fn, device, epoch_index
 
 def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir, device="cuda:0",
                          training_epochs=90, lr=0.1, momentum=0.9, weight_decay=1e-4, batch_size=32, lr_step_size=30,
-                         lr_gamma=0.1, train_loss_write_period_logs=100, target_accuracy=0.8):
+                         lr_gamma=0.1, train_loss_write_period_logs=100, target_accuracy=0.7):
     """
     Perform the training of the given model.
     The default hyper-parameters correspond to the ones that were used to train ResNet18 model. The stochastic
@@ -330,7 +330,7 @@ def load_resnet18_based_model(model_dir, device):
                            'resnet18', pretrained=False)
     model.fc = Linear(in_features=512, out_features=2, bias=True)
     # add conditions for when the model does not reached 80% in accuracy
-    checkpoint = "model_at_80" if os.path.exists(os.path.join(model_dir, "model_at_80")) \
+    checkpoint = "model_at_70" if os.path.exists(os.path.join(model_dir, "model_at_70")) \
         else "best_model"
 
     model.load_state_dict(torch.load(os.path.join(
