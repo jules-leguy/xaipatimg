@@ -336,8 +336,8 @@ def load_resnet18_based_model(model_dir, device):
     model.load_state_dict(torch.load(os.path.join(
         model_dir, checkpoint), weights_only=True))
     # model.load_state_dict(torch.load(os.path.join(model_dir, "best_model"), weights_only=True))
-    model.load_state_dict(torch.load(os.path.join(
-        model_dir, "model_at_80"), weights_only=True))
+    # model.load_state_dict(torch.load(os.path.join(
+    #     model_dir, "model_at_80"), weights_only=True))
     model.eval()
     return model.to(device)
 
