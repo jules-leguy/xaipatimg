@@ -329,7 +329,6 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     :target_accuracy: stop the model from training once the desired accuracy reached 
     :return:
     """
-    # ─── setup (unchanged) ─────────────────────────────────────────────
     os.makedirs(model_dir, exist_ok=True)
 
     means, stds = compute_mean_std_dataset(
