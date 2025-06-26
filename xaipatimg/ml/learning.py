@@ -280,6 +280,30 @@ def _train_epoch(training_loader, model, optimizer, loss_fn, device, epoch_index
 
 #         epoch_number += 1
 
+def check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, counter, patience):
+    """
+    Early stopping check on accuracy threshold and loss.
+    :param vaccuracy: the current accuracy on validation data
+    :param target_accuracy: the desired accuracy the model should reach
+    :param current_loss:
+    :param best_loss:
+    :param counter:
+    :param patience:
+    :return:
+    """
+    # Stop if accuracy threshold is reached
+    if vaccuracy >= target_accuracy:
+        return True, counter, best_loss
+
+    # Check for loss improvement
+    if current_loss < best_loss:
+        return False, 0, current_loss  # reset patience counter
+    else:
+        counter += 1
+        if counter >= patience:
+            return True, counter, best_loss  
+        return False, counter, best_loss
+
 def train_resnet18_model(
         db_dir, train_dataset_filename, valid_dataset_filename, model_dir,
         device="cuda:0",
