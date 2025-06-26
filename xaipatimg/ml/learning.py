@@ -18,7 +18,6 @@ from torchvision.transforms import transforms
 from xaipatimg.ml import resnet18_preprocess_no_norm
 
 
-
 class PatImgDataset(torch.utils.data.Dataset):
     def __init__(self, db_dir, csv_dataset_filename, transform=None, target_transform=None, max_size=None):
         """
@@ -152,7 +151,7 @@ def _train_epoch(training_loader, model, optimizer, loss_fn, device, epoch_index
 #     :param lr_step_size: learning rate step size (Step LR scheduler)
 #     :param lr_gamma: learning rate gamma (Step LR scheduler)
 #     :param train_loss_write_period_logs: period between two recordings of the training loss in the logs
-#     :target_accuracy: stop the model from training once the desired accuracy reached 
+#     :target_accuracy: stop the model from training once the desired accuracy reached
 #     :return:
 #     """
 #     os.makedirs(model_dir, exist_ok=True)
@@ -301,12 +300,13 @@ def check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, co
     else:
         counter += 1
         if counter >= patience:
-            return True, counter, best_loss  
+            return True, counter, best_loss
         return False, counter, best_loss
 
-def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir,device="cuda:0",training_epochs=90, lr=0.1,
-                        momentum=0.9, weight_decay=1e-4,batch_size=32, lr_step_size=30, lr_gamma=0.1,train_loss_write_period_logs=100,
-                        target_accuracy=0.8,training_mode="batch",patience=15,interval_batch=20):           
+
+def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir, device="cuda:0", training_epochs=90, lr=0.1,
+                         momentum=0.9, weight_decay=1e-4, batch_size=32, lr_step_size=30, lr_gamma=0.1, train_loss_write_period_logs=100,
+                         target_accuracy=0.8, training_mode="epoch", patience=15, interval_batch=20):
     """
     Perform the training of the given model.
     The default hyper-parameters correspond to the ones that were used to train ResNet18 model. The stochastic
@@ -344,26 +344,31 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
         transforms.Normalize(mean=means, std=stds)
     ])
 
-    dataset_train = PatImgDataset(db_dir, train_dataset_filename, transform=preprocess)
-    dataset_valid = PatImgDataset(db_dir, valid_dataset_filename, transform=preprocess)
-    training_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
-    valid_loader    = torch.utils.data.DataLoader(dataset_valid,  batch_size=batch_size, shuffle=False)
+    dataset_train = PatImgDataset(
+        db_dir, train_dataset_filename, transform=preprocess)
+    dataset_valid = PatImgDataset(
+        db_dir, valid_dataset_filename, transform=preprocess)
+    training_loader = torch.utils.data.DataLoader(
+        dataset_train, batch_size=batch_size, shuffle=True)
+    valid_loader = torch.utils.data.DataLoader(
+        dataset_valid,  batch_size=batch_size, shuffle=False)
 
-    model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=False)
+    model = torch.hub.load('pytorch/vision:v0.10.0',
+                           'resnet18', pretrained=False)
     model.fc = Linear(512, 2)
     model = model.to(device)
 
     optimizer = torch.optim.SGD(model.parameters(), lr=lr,
                                 momentum=momentum, weight_decay=weight_decay)
-    loss_fn   = torch.nn.CrossEntropyLoss()
+    loss_fn = torch.nn.CrossEntropyLoss()
     scheduler = StepLR(optimizer, step_size=lr_step_size, gamma=lr_gamma)
 
     # ─── bookkeeping ──────────────────────────────────────────────────
     epoch_number = 0
-    vaccuracies  = []
-    best_vloss   = np.inf
-    counter      = 0
-    global_step  = 0
+    vaccuracies = []
+    best_vloss = np.inf
+    counter = 0
+    global_step = 0
     stop_training = False
 
     writer = SummaryWriter(join(model_dir, "run/") +
@@ -443,11 +448,12 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
 
                 running_tloss += loss.item()
                 train_batches += 1
-                global_step   += 1
+                global_step += 1
 
                 if (batch_idx + 1) % train_loss_write_period_logs == 0:
                     avg_loss = running_tloss / train_batches
-                    print('  batch {} loss: {}'.format(batch_idx + 1, avg_loss))
+                    print('  batch {} loss: {}'.format(
+                        batch_idx + 1, avg_loss))
 
                 # validate every <interval_batch> steps
                 if global_step % interval_batch != 0:
@@ -460,11 +466,13 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
                 model.eval()
                 with torch.no_grad():
                     for j, vdata in enumerate(valid_loader):
-                        vinputs, vlabels = vdata[0].to(device), vdata[1].to(device)
+                        vinputs, vlabels = vdata[0].to(
+                            device), vdata[1].to(device)
                         vouts = model(vinputs.float())
                         running_vloss += loss_fn(vouts, vlabels).item()
                         probs = torch.softmax(vouts, dim=1)
-                        correct += (probs.argmax(dim=1) == vlabels).sum().item()
+                        correct += (probs.argmax(dim=1) ==
+                                    vlabels).sum().item()
                 model.train(True)
 
                 vaccuracy = correct / len(dataset_valid)
@@ -482,13 +490,15 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
                 # ── save best model & accuracy cap ──
                 if avg_vloss < best_vloss:
                     best_vloss = avg_vloss
-                    torch.save(model.state_dict(), join(model_dir, "best_model"))
+                    torch.save(model.state_dict(), join(
+                        model_dir, "best_model"))
                     with open(join(model_dir, "best_model_step"), "w") as f:
                         f.write(str(global_step))
                 if vaccuracy >= target_accuracy:
                     cap_path = join(model_dir, f"model_accuracy")
                     torch.save(model.state_dict(), cap_path)
-                    print(f"(batch mode) accuracy cap hit at step {global_step}")
+                    print(
+                        f"(batch mode) accuracy cap hit at step {global_step}")
                     stop_training = True
                     break
 
@@ -649,7 +659,7 @@ def save_classification(db_dir, test_dataset_filename, model_dir, classification
     :param classification_dir: path to the root directory of the classified image
     :param max_items: maximum number of items to copy.
     """
-    
+
     # "bluediagonal_test" → "bluediagonal"
     split_name = Path(test_dataset_filename).stem.rsplit("_", 1)[0]
     classification_dir = os.path.join(classification_dir, split_name)
