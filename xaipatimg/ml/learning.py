@@ -312,7 +312,7 @@ def train_resnet18_model(
         train_loss_write_period_logs=100,
         target_accuracy=0.8,
         training_mode="batch",        # "epoch" | "batch"
-        patience=10,                   # epochs / intervals with no gain
+        patience=15,                   # epochs / intervals with no gain
         interval_batch=20):           # batches between validations
     """
     Same API as your old function plus:
