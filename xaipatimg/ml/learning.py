@@ -287,7 +287,7 @@ def train_resnet18_model(
         batch_size=32, lr_step_size=30, lr_gamma=0.1,
         train_loss_write_period_logs=100,
         target_accuracy=0.8,
-        training_mode="epoch",        # "epoch" | "batch"
+        training_mode="batch",        # "epoch" | "batch"
         patience=10,                   # epochs / intervals with no gain
         interval_batch=20):           # batches between validations
     """
