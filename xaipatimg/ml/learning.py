@@ -394,7 +394,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
                     correct += (probs.argmax(dim=1) == vlabels).sum().item()
 
             vaccuracy = correct / len(dataset_valid)
-            vaccuracies.append(vaccuracy.cpu())
+            vaccuracies.append(vaccuracy)
             avg_vloss = running_vloss / (i + 1)
             print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
 
@@ -468,7 +468,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
                 model.train(True)
 
                 vaccuracy = correct / len(dataset_valid)
-                vaccuracies.append(vaccuracy.cpu())
+                vaccuracies.append(vaccuracy)
                 avg_vloss = running_vloss / (j + 1)
                 print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
 
