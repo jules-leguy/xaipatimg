@@ -304,22 +304,10 @@ def check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, co
             return True, counter, best_loss  
         return False, counter, best_loss
 
-def train_resnet18_model(
-        db_dir, train_dataset_filename, valid_dataset_filename, model_dir,
-        device="cuda:0",
-        training_epochs=90, lr=0.1, momentum=0.9, weight_decay=1e-4,
-        batch_size=32, lr_step_size=30, lr_gamma=0.1,
-        train_loss_write_period_logs=100,
-        target_accuracy=0.8,
-        training_mode="batch",        # "epoch" | "batch"
-        patience=15,                   # epochs / intervals with no gain
-        interval_batch=20):           # batches between validations
-    """
-    Same API as your old function plus:
-        training_mode   : "epoch" or "batch"
-        patience        : epochs/intervals w/o improvement
-        interval_batch  : validation frequency in batch-mode
-    """
+def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir,device="cuda:0",training_epochs=90, lr=0.1,
+                        momentum=0.9, weight_decay=1e-4,batch_size=32, lr_step_size=30, lr_gamma=0.1,train_loss_write_period_logs=100,
+                        target_accuracy=0.8,training_mode="batch",patience=15,interval_batch=25):           
+
     # ─── setup (unchanged) ─────────────────────────────────────────────
     os.makedirs(model_dir, exist_ok=True)
 
@@ -373,18 +361,23 @@ def train_resnet18_model(
                 training_loader, model, optimizer, loss_fn,
                 device, epoch_number, writer, train_loss_write_period_logs)
 
-            running_vloss, correct = 0.0, 0
+            running_vloss = 0.0
+            correct = 0
+            size = 0
             model.eval()
             with torch.no_grad():
                 for i, vdata in enumerate(valid_loader):
                     vinputs, vlabels = vdata[0].to(device), vdata[1].to(device)
-                    vouts = model(vinputs.float())
-                    running_vloss += loss_fn(vouts, vlabels).item()
-                    probs = torch.softmax(vouts, dim=1)
-                    correct += (probs.argmax(dim=1) == vlabels).sum().item()
+                    voutputs = model(vinputs.float())
+                    vloss = loss_fn(voutputs, vlabels)
+                    running_vloss += vloss
+                    probabilities = torch.nn.functional.softmax(voutputs, dim=1)
+                    correct += (probabilities.round().int().T[1] == vlabels).sum()
+                    size += len(vdata)
 
             vaccuracy = correct / len(dataset_valid)
-            vaccuracies.append(vaccuracy)
+            vaccuracies.append(vaccuracy.cpu()
+            )
             avg_vloss = running_vloss / (i + 1)
             print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
 
@@ -418,80 +411,90 @@ def train_resnet18_model(
             continue  # go to next epoch
 
         # ───────── 2) BATCH-MODE ──────────────────────────────────────
-        else:
-            model.train(True)
-            running_tloss, train_batches = 0.0, 0
+        else:  
+          model.train(True)
+          running_tloss = 0.0
+          train_batches = 0
 
-            for batch_idx, data in enumerate(training_loader):
-                inputs, labels = data[0].to(device), data[1].to(device)
-                optimizer.zero_grad()
-                outputs = model(inputs.float())
-                loss = loss_fn(outputs, labels)
-                loss.backward()
-                optimizer.step()
+          for batch_idx, data in enumerate(training_loader):
+              inputs, labels = data[0].to(device), data[1].to(device)
+              optimizer.zero_grad()
+              outputs = model(inputs.float())
+              loss = loss_fn(outputs, labels)
+              loss.backward()
+              optimizer.step()
 
-                running_tloss += loss.item()
-                train_batches += 1
-                global_step   += 1
+              running_tloss += loss.item()      # float — fine to keep .item() here
+              train_batches += 1
+              global_step   += 1
 
-                if (batch_idx + 1) % train_loss_write_period_logs == 0:
-                    avg_loss = running_tloss / train_batches
-                    print('  batch {} loss: {}'.format(batch_idx + 1, avg_loss))
+              if (batch_idx + 1) % train_loss_write_period_logs == 0:
+                  avg_loss = interval_tloss / interval_batch   # only last N batches
+                  interval_tloss = 0.0
+                  print(f'  batch {batch_idx+1}  loss_now={loss.item():.3f}')
+                  # avg_loss = running_tloss / train_batches
+                  # print('  batch {} loss: {}'.format(batch_idx + 1, avg_loss))
 
-                # validate every <interval_batch> steps
-                if global_step % interval_batch != 0:
-                    continue
+              # validate every <interval_batch> mini-batches
+              if global_step % interval_batch != 0:
+                  continue
 
-                avg_loss = running_tloss / train_batches
+              avg_loss = running_tloss / train_batches
 
-                running_vloss, correct = 0.0, 0
-                model.eval()
-                with torch.no_grad():
-                    for j, vdata in enumerate(valid_loader):
-                        vinputs, vlabels = vdata[0].to(device), vdata[1].to(device)
-                        vouts = model(vinputs.float())
-                        running_vloss += loss_fn(vouts, vlabels).item()
-                        probs = torch.softmax(vouts, dim=1)
-                        correct += (probs.argmax(dim=1) == vlabels).sum().item()
-                model.train(True)
+              # -------- validation (matches epoch-mode) --------------------
+              running_vloss = 0.0
+              correct       = 0
+              size          = 0
+              model.eval()
+              with torch.no_grad():
+                  for j, vdata in enumerate(valid_loader):
+                      vinputs, vlabels = vdata[0].to(device), vdata[1].to(device)
+                      vouts   = model(vinputs.float())
+                      vloss   = loss_fn(vouts, vlabels)            # tensor
+                      running_vloss += vloss                       # ← NO .item()
+                      probs  = torch.softmax(vouts, dim=1)
+                      correct += (probs.round().int().T[1] == vlabels).sum()
+                      size    += len(vdata)
+              model.train(True)   # resume training mode
 
-                vaccuracy = correct / len(dataset_valid)
-                vaccuracies.append(vaccuracy)
-                avg_vloss = running_vloss / (j + 1)
-                print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
+              vaccuracy = correct / len(dataset_valid)
+              vaccuracies.append(vaccuracy.cpu())
+              avg_vloss = running_vloss / (j + 1)
+              print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
 
-                writer.add_scalars('Training vs. Validation Loss',
-                                   {'Training': avg_loss, 'Validation': avg_vloss},
-                                   global_step)
-                writer.add_scalars('Validation accuracy',
-                                   {'Validation': vaccuracy}, global_step)
-                writer.flush()
+              writer.add_scalars('Training vs. Validation Loss',
+                                {'Training': avg_loss, 'Validation': avg_vloss},
+                                global_step)
+              writer.add_scalars('Validation accuracy',
+                                {'Validation': vaccuracy}, global_step)
+              writer.flush()
 
-                # ── save best model & accuracy cap ──
-                if avg_vloss < best_vloss:
-                    best_vloss = avg_vloss
-                    torch.save(model.state_dict(), join(model_dir, "best_model"))
-                    with open(join(model_dir, "best_model_step"), "w") as f:
-                        f.write(str(global_step))
-                if vaccuracy >= target_accuracy:
-                    cap_path = join(model_dir, f"model_accuracy")
-                    torch.save(model.state_dict(), cap_path)
-                    print(f"(batch mode) accuracy cap hit at step {global_step}")
-                    stop_training = True
-                    break
+              # ----- best-model & accuracy-cap -----------------------------
+              if avg_vloss < best_vloss:
+                  best_vloss = avg_vloss
+                  torch.save(model.state_dict(), join(model_dir, "best_model"))
+                  with open(join(model_dir, "best_model_step"), "w") as f:
+                      f.write(str(global_step))
+              if vaccuracy >= target_accuracy:
+                  cap_path = join(model_dir, "model_accuracy")
+                  torch.save(model.state_dict(), cap_path)
+                  print(f"(batch mode) accuracy cap hit at step {global_step}")
+                  stop_training = True
+                  break
 
-                early_stop, counter, best_vloss = check_early_stopping(
-                    vaccuracy, target_accuracy, avg_vloss,
-                    best_vloss, counter, patience)
-                if early_stop:
-                    print(f"(batch mode) early-stopping at step {global_step}")
-                    stop_training = True
-                    break
+              early_stop, counter, best_vloss = check_early_stopping(
+                  vaccuracy, target_accuracy, avg_vloss,
+                  best_vloss, counter, patience)
+              if early_stop:
+                  print(f"(batch mode) early-stopping at step {global_step}")
+                  stop_training = True
+                  break
 
-            epoch_number += 1  # finished this epoch (batch-mode)
+          epoch_number += 1
 
     writer.close()
     print("Training complete")
+
 
 
 def make_prediction(model, X, device):
