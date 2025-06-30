@@ -279,7 +279,7 @@ def _train_epoch(training_loader, model, optimizer, loss_fn, device, epoch_index
 
 #         epoch_number += 1
 
-def check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, counter, patience):
+def check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, counter, patience, model, model_dir, mode):
     """
     Early stopping check on accuracy threshold and loss.
     :param vaccuracy: the current accuracy on validation data
@@ -290,12 +290,20 @@ def check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, co
     :param patience:
     :return:
     """
+    label = "Epoch" if mode == "epoch" else "Step"
+    
     # Stop if accuracy threshold is reached
     if vaccuracy >= target_accuracy:
+        cap_path = join(model_dir, f"model_accuracy")
+        torch.save(model.state_dict(), cap_path)
+        print(f"(batch mode) accuracy cap hit at step {label}")
         return True, counter, best_loss
 
     # Check for loss improvement
     if current_loss < best_loss:
+        torch.save(model.state_dict(), join(model_dir, "best_model"))
+        with open(join(model_dir, "best_model_epoch"), "w") as f:
+            f.write(str(label))
         return False, 0, current_loss  # reset patience counter
     else:
         counter += 1
@@ -343,33 +351,26 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
         transforms.Normalize(mean=means, std=stds)
     ])
 
-    dataset_train = PatImgDataset(
-        db_dir, train_dataset_filename, transform=preprocess)
-    dataset_valid = PatImgDataset(
-        db_dir, valid_dataset_filename, transform=preprocess)
-    training_loader = torch.utils.data.DataLoader(
-        dataset_train, batch_size=batch_size, shuffle=True)
-    valid_loader = torch.utils.data.DataLoader(
-        dataset_valid,  batch_size=batch_size, shuffle=False)
+    dataset_train = PatImgDataset(db_dir, train_dataset_filename, transform=preprocess)
+    dataset_valid = PatImgDataset(db_dir, valid_dataset_filename, transform=preprocess)
+    training_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
+    valid_loader = torch.utils.data.DataLoader(dataset_valid,  batch_size=batch_size, shuffle=False)
 
-    model = torch.hub.load('pytorch/vision:v0.10.0',
-                           'resnet18', pretrained=False)
+    model = torch.hub.load('pytorch/vision:v0.10.0','resnet18', pretrained=False)
     model.fc = Linear(512, 2)
     model = model.to(device)
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=lr,
-                                momentum=momentum, weight_decay=weight_decay)
+    optimizer = torch.optim.SGD(model.parameters(), lr=lr,momentum=momentum, weight_decay=weight_decay)
     loss_fn = torch.nn.CrossEntropyLoss()
     scheduler = StepLR(optimizer, step_size=lr_step_size, gamma=lr_gamma)
 
-    # ─── bookkeeping ──────────────────────────────────────────────────
     epoch_number = 0
     vaccuracies = []
     best_vloss = np.inf
     counter = 0
+    #used to keep track of batch
     global_step = 0
     stop_training = False
-
     writer = SummaryWriter(join(model_dir, "run/") +
                            '_{}'.format(datetime.now().strftime('%Y%m%d_%H%M%S')))
 
@@ -410,20 +411,18 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
             writer.flush()
 
             # ── save best model & accuracy cap ──
-            if avg_vloss < best_vloss:
-                best_vloss = avg_vloss
-                torch.save(model.state_dict(), join(model_dir, "best_model"))
-                with open(join(model_dir, "best_model_epoch"), "w") as f:
-                    f.write(str(epoch_number + 1))
-            if vaccuracy >= target_accuracy:
-                cap_path = join(model_dir, f"model_accuracy")
-                torch.save(model.state_dict(), cap_path)
-                print(f"Accuracy cap reached → saved '{cap_path}'")
-                break
+            # if avg_vloss < best_vloss:
+            #     best_vloss = avg_vloss
+            #     torch.save(model.state_dict(), join(model_dir, "best_model"))
+            #     with open(join(model_dir, "best_model_epoch"), "w") as f:
+            #         f.write(str(epoch_number + 1))
+            # if vaccuracy >= target_accuracy:
+            #     cap_path = join(model_dir, f"model_accuracy")
+            #     torch.save(model.state_dict(), cap_path)
+            #     print(f"Accuracy cap reached → saved '{cap_path}'")
+            #     break
 
-            early_stop, counter, best_vloss = check_early_stopping(
-                vaccuracy, target_accuracy, avg_vloss,
-                best_vloss, counter, patience)
+            early_stop, counter, best_vloss = check_early_stopping(vaccuracy, target_accuracy, avg_vloss, best_vloss, counter, patience, model, model_dir, training_mode)
             if early_stop:
                 print("(epoch mode) early-stopping triggered")
                 break
@@ -449,17 +448,20 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
                 train_batches += 1
                 global_step += 1
 
+                #print loss every 100 batches
                 if (batch_idx + 1) % train_loss_write_period_logs == 0:
                     avg_loss = running_tloss / train_batches
                     print('  batch {} loss: {}'.format(
                         batch_idx + 1, avg_loss))
 
-                # validate every <interval_batch> steps
+                # Validation step every interval_batch
                 if global_step % interval_batch != 0:
                     continue
-                scheduler.step()
                 avg_loss = running_tloss / train_batches
-
+                # Reset training loss and batch counter
+                running_tloss = 0.0
+                train_batches = 0
+                
                 running_vloss = 0.0
                 correct = 0
                 model.eval()
@@ -472,7 +474,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
                         probs = torch.softmax(vouts, dim=1)
                         correct += (probs.argmax(dim=1) ==
                                     vlabels).sum().item()
-                model.train(True)
+                # model.train(True)
 
                 vaccuracy = correct / len(dataset_valid)
                 vaccuracies.append(vaccuracy)
@@ -486,24 +488,9 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
                                    {'Validation': vaccuracy}, global_step)
                 writer.flush()
 
-                # ── save best model & accuracy cap ──
-                if avg_vloss < best_vloss:
-                    best_vloss = avg_vloss
-                    torch.save(model.state_dict(), join(
-                        model_dir, "best_model"))
-                    with open(join(model_dir, "best_model_step"), "w") as f:
-                        f.write(str(global_step))
-                if vaccuracy >= target_accuracy:
-                    cap_path = join(model_dir, f"model_accuracy")
-                    torch.save(model.state_dict(), cap_path)
-                    print(
-                        f"(batch mode) accuracy cap hit at step {global_step}")
-                    stop_training = True
-                    break
-
                 early_stop, counter, best_vloss = check_early_stopping(
                     vaccuracy, target_accuracy, avg_vloss,
-                    best_vloss, counter, patience)
+                    best_vloss, counter, patience, model, model_dir, training_mode)
                 if early_stop:
                     print(f"(batch mode) early-stopping at step {global_step}")
                     stop_training = True
