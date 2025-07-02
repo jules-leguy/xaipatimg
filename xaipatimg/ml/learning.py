@@ -279,7 +279,7 @@ def _train_epoch(training_loader, model, optimizer, loss_fn, device, epoch_index
 
 #         epoch_number += 1
 
-def check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, counter, patience, model, model_dir, mode):
+def check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, counter, patience, model, model_dir, mode, step):
     """
     Early stopping check on accuracy threshold and loss.
     :param vaccuracy: the current accuracy on validation data
@@ -288,33 +288,40 @@ def check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, co
     :param best_loss:
     :param counter:
     :param patience:
-    :return:
+    :param model:
+    :param model_dir:
+    :param mode: 'epoch' or 'batch'
+    :param step: epoch number or global step
+    :return: tuple (stop_training, new_counter, new_best_loss)
     """
     label = "Epoch" if mode == "epoch" else "Step"
-    
+
     # Stop if accuracy threshold is reached
     if vaccuracy >= target_accuracy:
-        cap_path = join(model_dir, f"model_accuracy")
+        cap_path = join(model_dir, f"model_at_{int(target_accuracy * 100)}")
         torch.save(model.state_dict(), cap_path)
-        print(f"(batch mode) accuracy cap hit at step {label}")
+        print(f"Accuracy cap hit at {label} {step}")
         return True, counter, best_loss
 
     # Check for loss improvement
     if current_loss < best_loss:
+        best_loss = current_loss
+        counter = 0
         torch.save(model.state_dict(), join(model_dir, "best_model"))
         with open(join(model_dir, "best_model_epoch"), "w") as f:
-            f.write(str(label))
-        return False, 0, current_loss  # reset patience counter
+            f.write(str(step))
+        return False, counter, best_loss
     else:
         counter += 1
         if counter >= patience:
+            print(f"Early stopping triggered at {label} {step}")
             return True, counter, best_loss
         return False, counter, best_loss
 
 
 def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir, device="cuda:0", training_epochs=90, lr=0.1,
                          momentum=0.9, weight_decay=1e-4, batch_size=32, lr_step_size=30, lr_gamma=0.1, train_loss_write_period_logs=100,
-                         target_accuracy=0.8, training_mode="epoch", patience=15, interval_batch=50):
+                         target_accuracy=0.8, training_mode="batch", patience=5, interval_batch=50):
     """
     Perform the training of the given model.
     The default hyper-parameters correspond to the ones that were used to train ResNet18 model. The stochastic
@@ -334,7 +341,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     :param lr_step_size: learning rate step size (Step LR scheduler)
     :param lr_gamma: learning rate gamma (Step LR scheduler)
     :param train_loss_write_period_logs: period between two recordings of the training loss in the logs
-    :target_accuracy: stop the model from training once the desired accuracy reached 
+    :target_accuracy: stop the model from training once the desired accuracy reached
     :return:
     """
     os.makedirs(model_dir, exist_ok=True)
@@ -351,16 +358,22 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
         transforms.Normalize(mean=means, std=stds)
     ])
 
-    dataset_train = PatImgDataset(db_dir, train_dataset_filename, transform=preprocess)
-    dataset_valid = PatImgDataset(db_dir, valid_dataset_filename, transform=preprocess)
-    training_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
-    valid_loader = torch.utils.data.DataLoader(dataset_valid,  batch_size=batch_size, shuffle=False)
+    dataset_train = PatImgDataset(
+        db_dir, train_dataset_filename, transform=preprocess)
+    dataset_valid = PatImgDataset(
+        db_dir, valid_dataset_filename, transform=preprocess)
+    training_loader = torch.utils.data.DataLoader(
+        dataset_train, batch_size=batch_size, shuffle=True)
+    valid_loader = torch.utils.data.DataLoader(
+        dataset_valid,  batch_size=batch_size, shuffle=False)
 
-    model = torch.hub.load('pytorch/vision:v0.10.0','resnet18', pretrained=False)
+    model = torch.hub.load('pytorch/vision:v0.10.0',
+                           'resnet18', pretrained=False)
     model.fc = Linear(512, 2)
     model = model.to(device)
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=lr,momentum=momentum, weight_decay=weight_decay)
+    optimizer = torch.optim.SGD(
+        model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
     loss_fn = torch.nn.CrossEntropyLoss()
     scheduler = StepLR(optimizer, step_size=lr_step_size, gamma=lr_gamma)
 
@@ -368,7 +381,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     vaccuracies = []
     best_vloss = np.inf
     counter = 0
-    #used to keep track of batch
+    # used to keep track of batch
     global_step = 0
     stop_training = False
     writer = SummaryWriter(join(model_dir, "run/") +
@@ -410,21 +423,9 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
                                {'Validation': vaccuracy}, epoch_number + 1)
             writer.flush()
 
-            # ── save best model & accuracy cap ──
-            # if avg_vloss < best_vloss:
-            #     best_vloss = avg_vloss
-            #     torch.save(model.state_dict(), join(model_dir, "best_model"))
-            #     with open(join(model_dir, "best_model_epoch"), "w") as f:
-            #         f.write(str(epoch_number + 1))
-            # if vaccuracy >= target_accuracy:
-            #     cap_path = join(model_dir, f"model_accuracy")
-            #     torch.save(model.state_dict(), cap_path)
-            #     print(f"Accuracy cap reached → saved '{cap_path}'")
-            #     break
-
-            early_stop, counter, best_vloss = check_early_stopping(vaccuracy, target_accuracy, avg_vloss, best_vloss, counter, patience, model, model_dir, training_mode)
+            early_stop, counter, best_vloss = check_early_stopping(
+                vaccuracy, target_accuracy, avg_vloss, best_vloss, counter, patience, model, model_dir, training_mode, epoch_number + 1)
             if early_stop:
-                print("(epoch mode) early-stopping triggered")
                 break
             scheduler.step()
             epoch_number += 1
@@ -448,7 +449,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
                 train_batches += 1
                 global_step += 1
 
-                #print loss every 100 batches
+                # print loss every 100 batches
                 if (batch_idx + 1) % train_loss_write_period_logs == 0:
                     avg_loss = running_tloss / train_batches
                     print('  batch {} loss: {}'.format(
@@ -461,7 +462,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
                 # Reset training loss and batch counter
                 running_tloss = 0.0
                 train_batches = 0
-                
+
                 running_vloss = 0.0
                 correct = 0
                 model.eval()
@@ -474,7 +475,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
                         probs = torch.softmax(vouts, dim=1)
                         correct += (probs.argmax(dim=1) ==
                                     vlabels).sum().item()
-                # model.train(True)
+                model.train()
 
                 vaccuracy = correct / len(dataset_valid)
                 vaccuracies.append(vaccuracy)
@@ -490,12 +491,15 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
 
                 early_stop, counter, best_vloss = check_early_stopping(
                     vaccuracy, target_accuracy, avg_vloss,
-                    best_vloss, counter, patience, model, model_dir, training_mode)
+                    best_vloss, counter, patience, model, model_dir, training_mode, global_step)
                 if early_stop:
-                    print(f"(batch mode) early-stopping at step {global_step}")
                     stop_training = True
                     break
+            
+            if stop_training:
+                break
 
+            scheduler.step()
             epoch_number += 1  # finished this epoch (batch-mode)
 
     writer.close()
@@ -552,7 +556,7 @@ def load_resnet18_based_model(model_dir, device):
                            'resnet18', pretrained=False)
     model.fc = Linear(in_features=512, out_features=2, bias=True)
     # add conditions for when the model does not reached 80% in accuracy
-    checkpoint = "model_accuracy" if os.path.exists(os.path.join(model_dir, "model_accuracy")) \
+    checkpoint = "model_at_80" if os.path.exists(os.path.join(model_dir, "model_at_80")) \
         else "best_model"
 
     model.load_state_dict(torch.load(os.path.join(
