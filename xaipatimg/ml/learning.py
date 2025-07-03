@@ -303,6 +303,7 @@ def check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, co
         torch.save(model.state_dict(), cap_path)
         print(f"Accuracy cap hit at {label} {step}")
         return True, counter, best_loss
+    return False, counter, best_loss
 
     # Check for loss improvement
     # if current_loss < best_loss:
