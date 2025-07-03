@@ -7,6 +7,7 @@ import os
 import torch
 import tqdm
 import shutil
+import wandb
 from PIL import Image
 from pathlib import Path
 from sklearn.metrics import accuracy_score, precision_score, roc_auc_score, recall_score, confusion_matrix
@@ -304,19 +305,19 @@ def check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, co
         return True, counter, best_loss
 
     # Check for loss improvement
-    if current_loss < best_loss:
-        best_loss = current_loss
-        counter = 0
-        torch.save(model.state_dict(), join(model_dir, "best_model"))
-        with open(join(model_dir, "best_model_epoch"), "w") as f:
-            f.write(str(step))
-        return False, counter, best_loss
-    else:
-        counter += 1
-        if counter >= patience:
-            print(f"Early stopping triggered at {label} {step}")
-            return True, counter, best_loss
-        return False, counter, best_loss
+    # if current_loss < best_loss:
+    #     best_loss = current_loss
+    #     counter = 0
+    #     torch.save(model.state_dict(), join(model_dir, "best_model"))
+    #     with open(join(model_dir, "best_model_epoch"), "w") as f:
+    #         f.write(str(step))
+    #     return False, counter, best_loss
+    # else:
+    #     counter += 1
+    #     if counter >= patience:
+    #         print(f"Early stopping triggered at {label} {step}")
+    #         return True, counter, best_loss
+    #     return False, counter, best_loss
 
 
 def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir, device="cuda:0", training_epochs=90, lr=0.1,
@@ -345,6 +346,20 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     :return:
     """
     os.makedirs(model_dir, exist_ok=True)
+
+    rule_name = Path(train_dataset_filename).stem.split('_')[0]
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    wandb.init(project="xaipatimg", name=f"{rule_name}-{timestamp}", config={
+        "learning_rate": lr,
+        "epochs": training_epochs,
+        "batch_size": batch_size,
+        "lr_step_size": lr_step_size,
+        "lr_gamma": lr_gamma,
+        "target_accuracy": target_accuracy,
+        "training_mode": training_mode,
+        "patience": patience,
+        "interval_batch": interval_batch
+    })
 
     means, stds = compute_mean_std_dataset(
         db_dir, train_dataset_filename, resnet18_preprocess_no_norm)
@@ -423,6 +438,8 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
                                {'Validation': vaccuracy}, epoch_number + 1)
             writer.flush()
 
+            wandb.log({"avg_loss": avg_loss, "avg_vloss": avg_vloss, "vaccuracy": vaccuracy, "epoch": epoch_number + 1})
+
             early_stop, counter, best_vloss = check_early_stopping(
                 vaccuracy, target_accuracy, avg_vloss, best_vloss, counter, patience, model, model_dir, training_mode, epoch_number + 1)
             if early_stop:
@@ -489,6 +506,8 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
                                    {'Validation': vaccuracy}, global_step)
                 writer.flush()
 
+                wandb.log({"avg_loss": avg_loss, "avg_vloss": avg_vloss, "vaccuracy": vaccuracy, "global_step": global_step})
+
                 early_stop, counter, best_vloss = check_early_stopping(
                     vaccuracy, target_accuracy, avg_vloss,
                     best_vloss, counter, patience, model, model_dir, training_mode, global_step)
@@ -503,6 +522,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
             epoch_number += 1  # finished this epoch (batch-mode)
 
     writer.close()
+    wandb.finish()
     print("Training complete")
 
 
