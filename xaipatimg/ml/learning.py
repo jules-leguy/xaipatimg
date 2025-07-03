@@ -323,7 +323,7 @@ def check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, co
 
 def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir, device="cuda:0", training_epochs=90, lr=0.1,
                          momentum=0.9, weight_decay=1e-4, batch_size=32, lr_step_size=30, lr_gamma=0.1, train_loss_write_period_logs=100,
-                         target_accuracy=0.9, training_mode="batch", patience=5, interval_batch=50):
+                         target_accuracy=0.8, training_mode="batch", patience=5, interval_batch=50):
     """
     Perform the training of the given model.
     The default hyper-parameters correspond to the ones that were used to train ResNet18 model. The stochastic
@@ -576,7 +576,7 @@ def load_resnet18_based_model(model_dir, device):
     model = torch.hub.load('pytorch/vision:v0.10.0',
                            'resnet18', pretrained=False)
     model.fc = Linear(in_features=512, out_features=2, bias=True)
-    checkpoint = "model_at_90" if os.path.exists(os.path.join(model_dir, "model_at_90")) \
+    checkpoint = "model_at_80" if os.path.exists(os.path.join(model_dir, "model_at_80")) \
         else "best_model"
 
     model.load_state_dict(torch.load(os.path.join(
