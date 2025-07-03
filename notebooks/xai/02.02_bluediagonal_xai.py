@@ -1,4 +1,5 @@
 import os
+os.environ["DATA"] = os.path.expanduser("~/")
 
 db_dir = os.environ["DATA"] + "PatImgXAI_data/db0.1.4_6x6/"
 test_dataset_filename = "bluediagonal_test.csv"
