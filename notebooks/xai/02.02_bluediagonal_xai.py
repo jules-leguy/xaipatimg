@@ -3,8 +3,7 @@ os.environ["DATA"] = os.path.expanduser("~/")
 
 db_dir = os.environ["DATA"] + "PatImgXAI_data/db0.1.4_6x6/"
 test_dataset_filename = "bluediagonal_test.csv"
-
-model_dir = os.environ["DATA"] + "models/db_v0.1.3/bluediagonal_model/"
+model_dir = os.environ["DATA"] + "models/db0.1.4_6x6/bluediagonal_80accuracy_model/"
 
 from xaipatimg.ml.xai import generate_cam_resnet18
 

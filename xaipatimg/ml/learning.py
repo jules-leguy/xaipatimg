@@ -507,7 +507,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
                                    {'Validation': vaccuracy}, global_step)
                 writer.flush()
 
-                wandb.log({"avg_loss": avg_loss, "avg_vloss": avg_vloss, "vaccuracy": vaccuracy, "global_step": global_step})
+                wandb.log({"training_loss": avg_loss, "validation_loss": avg_vloss, "vaccuracy": vaccuracy, "global_step": global_step})
 
                 early_stop, counter, best_vloss = check_early_stopping(
                     vaccuracy, target_accuracy, avg_vloss,
