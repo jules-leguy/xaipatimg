@@ -439,7 +439,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
                                {'Validation': vaccuracy}, epoch_number + 1)
             writer.flush()
 
-            wandb.log({"avg_loss": avg_loss, "avg_vloss": avg_vloss, "vaccuracy": vaccuracy, "epoch": epoch_number + 1})
+            wandb.log({"training_loss": avg_loss, "validation_loss": avg_vloss, "vaccuracy": vaccuracy, "epoch": epoch_number + 1})
 
             early_stop, counter, best_vloss = check_early_stopping(
                 vaccuracy, target_accuracy, avg_vloss, best_vloss, counter, patience, model, model_dir, training_mode, epoch_number + 1)
