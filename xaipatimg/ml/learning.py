@@ -344,12 +344,14 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     :param lr_gamma: learning rate gamma (Step LR scheduler)
     :param train_loss_write_period_logs: period between two recordings of the training loss in the logs
     :target_accuracy: stop the model from training once the desired accuracy reached
+    :interval_batch: validation frequency in batches
     :return:
     """
     os.makedirs(model_dir, exist_ok=True)
 
     rule_name = Path(train_dataset_filename).stem.split('_')[0]
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    #initialize weight and biases to plot out experiment tracking 
     wandb.init(project="xaipatimg", name=f"{rule_name}-{timestamp}", config={
         "learning_rate": lr,
         "epochs": training_epochs,
@@ -374,15 +376,10 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
         transforms.Normalize(mean=means, std=stds)
     ])
 
-    dataset_train = PatImgDataset(
-        db_dir, train_dataset_filename, transform=preprocess)
-    dataset_valid = PatImgDataset(
-        db_dir, valid_dataset_filename, transform=preprocess)
-    training_loader = torch.utils.data.DataLoader(
-        dataset_train, batch_size=batch_size, shuffle=True)
-    valid_loader = torch.utils.data.DataLoader(
-        dataset_valid,  batch_size=batch_size, shuffle=False)
-
+    dataset_train = PatImgDataset(db_dir, train_dataset_filename, transform=preprocess)
+    dataset_valid = PatImgDataset(db_dir, valid_dataset_filename, transform=preprocess)
+    training_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
+    valid_loader = torch.utils.data.DataLoader(dataset_valid,  batch_size=batch_size, shuffle=False)
     model = torch.hub.load('pytorch/vision:v0.10.0',
                            'resnet18', pretrained=False)
     model.fc = Linear(512, 2)
