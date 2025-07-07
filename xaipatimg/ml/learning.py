@@ -285,12 +285,12 @@ def check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, co
     Early stopping check on accuracy threshold and loss.
     :param vaccuracy: the current accuracy on validation data
     :param target_accuracy: the desired accuracy the model should reach
-    :param current_loss:
-    :param best_loss:
-    :param counter:
-    :param patience:
-    :param model:
-    :param model_dir:
+    :param current_loss: current validation loss
+    :param best_loss: best lowest validation loss seen so far
+    :param counter: count how many consecutive evaluations have not improved best_loss.
+    :param patience: the number of times in a row that the validation loss does not improve before training is stopped early.
+    :param model: save the model when the condition is met
+    :param model_dir: directory to save model checkpoint
     :param mode: 'epoch' or 'batch'
     :param step: epoch number or global step
     :return: tuple (stop_training, new_counter, new_best_loss)
@@ -349,9 +349,9 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     """
     os.makedirs(model_dir, exist_ok=True)
 
+    # --- Setup ---
     rule_name = Path(train_dataset_filename).stem.split('_')[0]
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    #initialize weight and biases to plot out experiment tracking 
     wandb.init(project="xaipatimg", name=f"{rule_name}-{timestamp}", config={
         "learning_rate": lr,
         "epochs": training_epochs,
@@ -366,7 +366,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
 
     means, stds = compute_mean_std_dataset(
         db_dir, train_dataset_filename, resnet18_preprocess_no_norm)
-    print("Train dataset statistics : " + str(means) + " " + str(stds))
+    print(f"Train dataset statistics : " + str(means) + " " + str(stds))
     with open(os.path.join(model_dir, "train_set_stats.json"), "w") as f:
         json.dump({"mean": means, "std": stds}, f)
 
@@ -376,10 +376,15 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
         transforms.Normalize(mean=means, std=stds)
     ])
 
-    dataset_train = PatImgDataset(db_dir, train_dataset_filename, transform=preprocess)
-    dataset_valid = PatImgDataset(db_dir, valid_dataset_filename, transform=preprocess)
-    training_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
-    valid_loader = torch.utils.data.DataLoader(dataset_valid,  batch_size=batch_size, shuffle=False)
+    dataset_train = PatImgDataset(
+        db_dir, train_dataset_filename, transform=preprocess)
+    dataset_valid = PatImgDataset(
+        db_dir, valid_dataset_filename, transform=preprocess)
+    training_loader = torch.utils.data.DataLoader(
+        dataset_train, batch_size=batch_size, shuffle=True)
+    valid_loader = torch.utils.data.DataLoader(
+        dataset_valid, batch_size=batch_size, shuffle=False)
+
     model = torch.hub.load('pytorch/vision:v0.10.0',
                            'resnet18', pretrained=False)
     model.fc = Linear(512, 2)
@@ -390,69 +395,84 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     loss_fn = torch.nn.CrossEntropyLoss()
     scheduler = StepLR(optimizer, step_size=lr_step_size, gamma=lr_gamma)
 
-    epoch_number = 0
-    vaccuracies = []
+    writer = SummaryWriter(
+        join(model_dir, "run/") + f'_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
+
+    # --- Training State ---
     best_vloss = np.inf
     counter = 0
-    # used to keep track of batch
     global_step = 0
     stop_training = False
-    writer = SummaryWriter(join(model_dir, "run/") +
-                           '_{}'.format(datetime.now().strftime('%Y%m%d_%H%M%S')))
+    vaccuracies = []
 
-    # ─── training loop ────────────────────────────────────────────────
+    # --- Validation Helper ---
+    def _validate_and_log(current_avg_tloss, step):
+        nonlocal best_vloss, counter, stop_training, vaccuracies
+
+        model.eval()
+        running_vloss = 0.0
+        correct = 0
+        with torch.no_grad():
+            for i, vdata in enumerate(valid_loader):
+                vinputs, vlabels = vdata[0].to(device), vdata[1].to(device)
+                vouts = model(vinputs.float())
+                running_vloss += loss_fn(vouts, vlabels).item()
+                probs = torch.softmax(vouts, dim=1)
+                correct += (probs.argmax(dim=1) == vlabels).sum().item()
+        model.train()
+
+        avg_vloss = running_vloss / (i + 1)
+        vaccuracy = correct / len(dataset_valid)
+        vaccuracies.append(vaccuracy)
+
+        print(f'LOSS train {current_avg_tloss:.4f} valid {avg_vloss:.4f}')
+
+        writer.add_scalars('Training vs. Validation Loss',
+                           {'Training': current_avg_tloss,
+                               'Validation': avg_vloss},
+                           step)
+        writer.add_scalars('Validation accuracy',
+                           {'Validation': vaccuracy}, step)
+        writer.flush()
+
+        wandb_log = {"training_loss": current_avg_tloss,
+                     "validation_loss": avg_vloss, "vaccuracy": vaccuracy}
+        if training_mode == "epoch":
+            wandb_log["epoch"] = step
+        else:
+            wandb_log["global_step"] = step
+        wandb.log(wandb_log)
+
+        early_stop, new_counter, new_best_vloss = check_early_stopping(
+            vaccuracy, target_accuracy, avg_vloss, best_vloss, counter, patience, model, model_dir, training_mode, step)
+
+        counter = new_counter
+        best_vloss = new_best_vloss
+        if early_stop:
+            stop_training = True
+
+    # --- Training Loop ---
     for epoch in range(training_epochs):
         if stop_training:
             break
-        print('EPOCH {}:'.format(epoch_number + 1))
+        print(f'EPOCH {epoch + 1}:')
+        model.train()
 
-        # ───────── 1) EPOCH-MODE ──────────────────────────────────────
+        # 1) EPOCH-MODE
         if training_mode == "epoch":
-            model.train(True)
             avg_loss = _train_epoch(
                 training_loader, model, optimizer, loss_fn,
-                device, epoch_number, writer, train_loss_write_period_logs)
+                device, epoch, writer, train_loss_write_period_logs)
+            _validate_and_log(avg_loss, epoch + 1)
 
-            running_vloss = 0.0
-            correct = 0
-            model.eval()
-            with torch.no_grad():
-                for i, vdata in enumerate(valid_loader):
-                    vinputs, vlabels = vdata[0].to(device), vdata[1].to(device)
-                    vouts = model(vinputs.float())
-                    running_vloss += loss_fn(vouts, vlabels).item()
-                    probs = torch.softmax(vouts, dim=1)
-                    correct += (probs.argmax(dim=1) == vlabels).sum().item()
-
-            vaccuracy = correct / len(dataset_valid)
-            vaccuracies.append(vaccuracy)
-            avg_vloss = running_vloss / (i + 1)
-            print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
-
-            writer.add_scalars('Training vs. Validation Loss',
-                               {'Training': avg_loss, 'Validation': avg_vloss},
-                               epoch_number + 1)
-            writer.add_scalars('Validation accuracy',
-                               {'Validation': vaccuracy}, epoch_number + 1)
-            writer.flush()
-
-            wandb.log({"training_loss": avg_loss, "validation_loss": avg_vloss, "vaccuracy": vaccuracy, "epoch": epoch_number + 1})
-
-            early_stop, counter, best_vloss = check_early_stopping(
-                vaccuracy, target_accuracy, avg_vloss, best_vloss, counter, patience, model, model_dir, training_mode, epoch_number + 1)
-            if early_stop:
-                break
-            scheduler.step()
-            epoch_number += 1
-            continue  # go to next epoch
-
-        # ───────── 2) BATCH-MODE ──────────────────────────────────────
+        # 2) BATCH-MODE
         else:
-            model.train(True)
             running_tloss = 0.0
             train_batches = 0
-
             for batch_idx, data in enumerate(training_loader):
+                if stop_training:
+                    break
+
                 inputs, labels = data[0].to(device), data[1].to(device)
                 optimizer.zero_grad()
                 outputs = model(inputs.float())
@@ -464,60 +484,18 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
                 train_batches += 1
                 global_step += 1
 
-                # print loss every 100 batches
                 if (batch_idx + 1) % train_loss_write_period_logs == 0:
                     avg_loss = running_tloss / train_batches
                     print('  batch {} loss: {}'.format(
                         batch_idx + 1, avg_loss))
 
-                # Validation step every interval_batch
-                if global_step % interval_batch != 0:
-                    continue
-                avg_loss = running_tloss / train_batches
-                # Reset training loss and batch counter
-                running_tloss = 0.0
-                train_batches = 0
+                if global_step % interval_batch == 0:
+                    avg_tloss = running_tloss / train_batches
+                    _validate_and_log(avg_tloss, global_step)
+                    running_tloss = 0.0
+                    train_batches = 0
 
-                running_vloss = 0.0
-                correct = 0
-                model.eval()
-                with torch.no_grad():
-                    for j, vdata in enumerate(valid_loader):
-                        vinputs, vlabels = vdata[0].to(
-                            device), vdata[1].to(device)
-                        vouts = model(vinputs.float())
-                        running_vloss += loss_fn(vouts, vlabels).item()
-                        probs = torch.softmax(vouts, dim=1)
-                        correct += (probs.argmax(dim=1) ==
-                                    vlabels).sum().item()
-                model.train()
-
-                vaccuracy = correct / len(dataset_valid)
-                vaccuracies.append(vaccuracy)
-                avg_vloss = running_vloss / (j + 1)
-                print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
-
-                writer.add_scalars('Training vs. Validation Loss',
-                                   {'Training': avg_loss, 'Validation': avg_vloss},
-                                   global_step)
-                writer.add_scalars('Validation accuracy',
-                                   {'Validation': vaccuracy}, global_step)
-                writer.flush()
-
-                wandb.log({"training_loss": avg_loss, "validation_loss": avg_vloss, "vaccuracy": vaccuracy, "global_step": global_step})
-
-                early_stop, counter, best_vloss = check_early_stopping(
-                    vaccuracy, target_accuracy, avg_vloss,
-                    best_vloss, counter, patience, model, model_dir, training_mode, global_step)
-                if early_stop:
-                    stop_training = True
-                    break
-            
-            if stop_training:
-                break
-
-            scheduler.step()
-            epoch_number += 1  # finished this epoch (batch-mode)
+        scheduler.step()
 
     writer.close()
     wandb.finish()
