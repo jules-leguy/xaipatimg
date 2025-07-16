@@ -19,8 +19,8 @@ import shutil
 import json
 import pandas as pd
 
-os.environ["DATA"] = "/content/drive/MyDrive/IMT/Internship"
-db_dir = os.environ["DATA"] + "PatImgXAI_data/db0.1.3/"
+os.environ["DATA"] = os.path.expanduser("~/")
+db_dir = os.environ["DATA"] + "PatImgXAI_data/db0.1.4_6x6/"
 db = os.path.join(db_dir, "datasets")
 db_json = os.path.join(db_dir, "db.json")
 
