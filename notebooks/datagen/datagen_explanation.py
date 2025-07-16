@@ -259,11 +259,11 @@ def extract_sample_with_explanations(explanation_json_path, output_dir_path, pos
 
     print(f"Extracted {pos_nb} positive and {neg_nb} negative samples to {output_dir_path}")
 
-extract_sample_with_explanations("bluediagonal_test_explanations.json", "bluediagonal_test__explanation_sample", 20, 20)
+extract_sample_with_explanations("bluediagonal_test_explanations.json", "bluediagonal_test_explanation_sample", 20, 20)
 
-extract_sample_with_explanations("exactly_6_red_symbols_test_explanations.json", "exactly_6_red_symbols_test__explanation_sample", 20, 20)
+extract_sample_with_explanations("exactly_6_red_symbols_test_explanations.json", "exactly_6_red_symbols_test_explanation_sample", 20, 20)
 
-extract_sample_with_explanations("exactly_6_squares_test_explanations.json", "exactly_6_squares_test__explanation_sample", 20, 20)
+extract_sample_with_explanations("exactly_6_squares_test_explanations.json", "exactly_6_squares_test_explanation_sample", 20, 20)
 
-extract_sample_with_explanations("twice_as_many_green_as_red_test_explanations.json", "twice_as_many_green_as_red_test__explanation_sample", 20, 20)
+extract_sample_with_explanations("twice_as_many_green_as_red_test_explanations.json", "twice_as_many_green_as_red_test_explanation_sample", 20, 20)
 
