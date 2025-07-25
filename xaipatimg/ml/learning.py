@@ -130,7 +130,7 @@ def _train_epoch(training_loader, model, optimizer, loss_fn, device, epoch_index
     return last_loss
 
 
-def check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, counter, patience, model, model_dir, mode, step):
+def _check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, counter, patience, model, model_dir, mode, step):
     """
     Early stopping check on accuracy threshold and loss.
     :param vaccuracy: the current accuracy on validation data
@@ -153,27 +153,28 @@ def check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, co
         torch.save(model.state_dict(), cap_path)
         print(f"Accuracy cap hit at {label} {step}")
         return True, counter, best_loss
-    return False, counter, best_loss
 
-    # Check for loss improvement
-    # if current_loss < best_loss:
-    #     best_loss = current_loss
-    #     counter = 0
-    #     torch.save(model.state_dict(), join(model_dir, "best_model"))
-    #     with open(join(model_dir, "best_model_epoch"), "w") as f:
-    #         f.write(str(step))
-    #     return False, counter, best_loss
-    # else:
-    #     counter += 1
-    #     if counter >= patience:
-    #         print(f"Early stopping triggered at {label} {step}")
-    #         return True, counter, best_loss
-    #     return False, counter, best_loss
+    if patience is not None:
+        # Check for loss improvement
+        if current_loss < best_loss:
+            best_loss = current_loss
+            counter = 0
+            torch.save(model.state_dict(), join(model_dir, "best_model"))
+            with open(join(model_dir, "best_model_epoch"), "w") as f:
+                f.write(str(step))
+            return False, counter, best_loss
+        else:
+            counter += 1
+            if counter >= patience:
+                print(f"Early stopping triggered at {label} {step}")
+                return True, counter, best_loss
+            return False, counter, best_loss
+    return False, counter, best_loss
 
 
 def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir, device="cuda:0", training_epochs=90, lr=0.1,
                          momentum=0.9, weight_decay=1e-4, batch_size=32, lr_step_size=30, lr_gamma=0.1, train_loss_write_period_logs=100,
-                         target_accuracy=0.9, training_mode="batch", patience=5, interval_batch=200):
+                         target_accuracy=1.0, training_mode="batch", patience=None, interval_batch=200):
     """
     Perform the training of the given model.
     The default hyper-parameters correspond to the ones that were used to train ResNet18 model. The stochastic
@@ -193,8 +194,10 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     :param lr_step_size: learning rate step size (Step LR scheduler)
     :param lr_gamma: learning rate gamma (Step LR scheduler)
     :param train_loss_write_period_logs: period between two recordings of the training loss in the logs
-    :target_accuracy: stop the model from training once the desired accuracy reached
-    :interval_batch: validation frequency in batches
+    :param target_accuracy: stop the model from training once the desired accuracy on the validation dataset is reached
+    :param training_mode: decides whether the model runs training and validation checks per 'batch' or per 'epoch'. 
+    :param patience: the number of times in a row that the validation loss does not improve before training is stopped early.
+    :param interval_batch: number of batches between each validation
     :return:
     """
     os.makedirs(model_dir, exist_ok=True)
@@ -293,7 +296,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
             wandb_log["global_step"] = step
         wandb.log(wandb_log)
 
-        early_stop, new_counter, new_best_vloss = check_early_stopping(
+        early_stop, new_counter, new_best_vloss = _check_early_stopping(
             vaccuracy, target_accuracy, avg_vloss, best_vloss, counter, patience, model, model_dir, training_mode, step)
 
         counter = new_counter
@@ -349,6 +352,8 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
 
     writer.close()
     wandb.finish()
+    final_model_path = os.path.join(model_dir, "final_model")
+    torch.save(model.state_dict(), final_model_path)
     print("Training complete")
 
 
