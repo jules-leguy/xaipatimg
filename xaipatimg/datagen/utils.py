@@ -14,6 +14,21 @@ def gen_rand_sym(shapes, colors):
     """
     return {"shape": np.random.choice(shapes), "color": np.random.choice(colors)}
 
+def get_coords_diff(patimgobj1, patimgobj2):
+    """
+    Returning the list of coordinates where the two given PatImgObj instances are not identical. Assuming both instances
+    have the same grid size.
+    :param patimgobj1: first instance of PatImgObj.
+    :param patimgobj2: second instance of PatImgObj.
+    :return:
+    """
+    assert patimgobj1.division == patimgobj2.division
+    coords_list = []
+    for x in range(patimgobj1.division[0]):
+        for y in range(patimgobj1.division[1]):
+            if patimgobj1.img_content_arr[x][y] != patimgobj2.img_content_arr[x][y]:
+                coords_list.append((x, y))
+    return coords_list
 
 class PatImgObj:
     """ Representing XAI pattern images as a Python object to facilitate the edition of the content """
@@ -94,12 +109,3 @@ class PatImgObj:
             "content": img_content,
             "path": self.path,
         }
-
-
-    def get_diff_coordinates(self, patimgobj):
-        """
-        Returning the list of coordinates
-        :param patimgobj:
-        :return: lsit
-        """
-        pass

@@ -22,7 +22,7 @@ def draw_triangle(draw, x, y, size, color):
               (x + half_size, y + height / 2)]
     draw.polygon(points, fill=color, outline=color)
 
-def gen_img(img_path, content, division=(4,7), dimension=(400, 700), overwrite=False):
+def gen_img(img_path, content, division=(4,7), dimension=(400, 700), to_highlight=None, overwrite=False):
     """
     Generate an image that fits the given features.
     :param img_path: path where to save the generated image.
@@ -30,9 +30,11 @@ def gen_img(img_path, content, division=(4,7), dimension=(400, 700), overwrite=F
     shapes in the picture.
     :param division: tuple that describes the number of horizontal and vertical divisions.
     :param dimension: tuple that describes the size of the image in pixels.
+    :param to_highlight: List of (x, y) positions to highlight (optional).
     :param overwrite: whether to overwrite existing images. If False, no action will be taken if the image already exists.
     :return: None
     """
+    to_highlight = set(to_highlight or [])
 
     # Exit if the file already exists and overwrite is set to False
     already_exists = os.path.exists(img_path)
@@ -53,6 +55,7 @@ def gen_img(img_path, content, division=(4,7), dimension=(400, 700), overwrite=F
 
     # Define shape size
     shape_size = 0.7 * max(cell_width, cell_height)
+    highlight_margin = 0.15 * shape_size  # margin around shape
 
     # Iterating over all the shapes to draw
     for c in content:
@@ -73,6 +76,19 @@ def gen_img(img_path, content, division=(4,7), dimension=(400, 700), overwrite=F
             draw_square(draw, x_center, y_center, shape_size / 2, color)
         elif shape == 'triangle':
             draw_triangle(draw, x_center, y_center, shape_size, color)
+
+    # Iterating over cells to highlight
+    for (x, y) in to_highlight:
+
+        # Calculate the center of the current grid cell
+        x_center = (x + 0.5) * cell_width
+        y_center = (y + 0.5) * cell_height
+
+        outer_r = shape_size / 2 + highlight_margin
+        draw.ellipse(
+            (x_center - outer_r, y_center - outer_r, x_center + outer_r, y_center + outer_r),
+            outline=(153, 153, 153), width=3
+        )
 
     # Save the image
     img.save(img_path)

@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 
 from xaipatimg.datagen.dbimg import load_db
 from xaipatimg.datagen.genimg import gen_img
+from xaipatimg.datagen.utils import get_coords_diff, PatImgObj
 from xaipatimg.ml import resnet18_preprocess_no_norm
 from xaipatimg.ml.learning import load_resnet18_based_model, get_dataset_transformed, make_prediction
 import numpy as np
@@ -290,7 +291,7 @@ def _cf_single_sample(db_dir, sample_idx, xai_output_path, counterfactual_fun, i
     """
 
     # Generate possible counterfactuals
-    counterfactuals_dict_list = counterfactual_fun(img_entry, y, nb_cf)
+    counterfactuals_dict_list = counterfactual_fun(img_entry, y_pred, nb_cf)
 
     # Create the temporary directory and store the path
     temp_dir = tempfile.mkdtemp()
@@ -308,7 +309,7 @@ def _cf_single_sample(db_dir, sample_idx, xai_output_path, counterfactual_fun, i
 
     # Writing a CSV dataset of counterfactuals to be able to pass them through the model
     dataset_path = os.path.join(temp_dir, "dataset.csv")
-    y_cf = [0 if y else 1 for _ in range(len(possible_cf_paths))]
+    y_cf = [None for _ in range(len(possible_cf_paths))] # These values will not be used so they are set to None
     csv_content_train = np.array([np.concatenate((["path"], possible_cf_paths), axis=0),
                                   np.concatenate((["class"], y_cf), axis=0)]).T
     with open(dataset_path, 'w') as f:
@@ -316,22 +317,27 @@ def _cf_single_sample(db_dir, sample_idx, xai_output_path, counterfactual_fun, i
         writer.writerows(csv_content_train)
 
     # Verifying that the generated samples are actual counterfactuals according to the model
-    # Loading data
     dataset = get_dataset_transformed(db_dir, model_dir, dataset_path)
     _, _, y_pred_cf, _ = _predict(model_dir, device, dataset)
-    actual_cf_paths = []
-    for i, y_pred_curr_cf in enumerate(y_pred_cf):
+    actual_cf_idx_list = []
+    for y_pred_cf_idx, y_pred_curr_cf in enumerate(y_pred_cf):
         # Exclusive or to check that the values are different
-        if bool(y) ^ bool(y_pred_curr_cf):
-            actual_cf_paths.append(possible_cf_paths[i])
+        if bool(y_pred) ^ bool(y_pred_curr_cf):
+            actual_cf_idx_list.append(y_pred_cf_idx)
 
     # Computing output path depending on target class and prediction
     curr_folder = os.path.join(xai_output_path, _get_subfolder(y_pred, y))
 
-    # Copying all the actual counterfactuals into the XAI output directory
+    # Copying the actual original image into the XAI output directory
     shutil.copyfile(og_img_path, os.path.join(curr_folder, str(sample_idx + 1) + ".png"))
-    for path_idx, actual_cf_path in enumerate(actual_cf_paths):
-        shutil.copyfile(actual_cf_path, os.path.join(curr_folder, str(sample_idx + 1) + "cf_" + str(path_idx) + ".png"))
+
+    # Generating counterfactual images for every actual counterfactual. Highlighting the cells where the counterfactual
+    # differs from the original image.
+    for actual_cf_idx in actual_cf_idx_list:
+        cf_dict = counterfactuals_dict_list[actual_cf_idx]
+        coords_diff = get_coords_diff(PatImgObj(img_entry), PatImgObj(cf_dict))
+        gen_img(os.path.join(curr_folder, str(sample_idx + 1) + "cf_" + str(actual_cf_idx) + ".png"),
+                cf_dict["content"], cf_dict["division"], cf_dict["size"], to_highlight=coords_diff)
 
     # Removing the temporary dictionary
     shutil.rmtree(temp_dir)
