@@ -131,9 +131,9 @@ def _shap_single_sample(i, shap_values, img_numpy, xai_output_path, y_pred, y, s
     shap_values[0] = -shap_values[0]
 
     # Plotting the output that contains the explanations, and removing the legend
-    # shap.image_plot(shap_values=shap_values, pixel_values=img_numpy, show=False, width=18,
-    #                 colormap_lim=max(abs(shap_values_lim[0]), abs(shap_values_lim[1])))
-    shap.image_plot(shap_values=shap_values, pixel_values=img_numpy, show=False, width=18)
+    shap.image_plot(shap_values=shap_values, pixel_values=img_numpy, show=False, width=18,
+                    colormap_lim=max(abs(shap_values_lim[0]), abs(shap_values_lim[1])))
+    # shap.image_plot(shap_values=shap_values, pixel_values=img_numpy, show=False, width=18)
     plt.gcf().axes[-1].remove()
 
     # Loading the plot as a PIL Image
