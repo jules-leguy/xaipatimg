@@ -1,6 +1,8 @@
 from datetime import datetime
 from os.path import join
 import json
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import os
@@ -76,6 +78,16 @@ class PatImgDataset(torch.utils.data.Dataset):
         :return: path to the image
         """
         return os.path.join(self.db_dir, self.img_list[idx])
+
+    def get_id(self, idx):
+        """
+        Returns the id of the image in the json database for a given index in the dataset.
+        Assumes that the filename is the same as the ID.
+        :param idx: index
+        :return:
+        """
+        # The filename is the id
+        return Path(self.img_list[idx]).stem
 
 
 def compute_mean_std_dataset(db_dir, dataset_filename, preprocess_no_norm):

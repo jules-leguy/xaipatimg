@@ -1,5 +1,9 @@
+import csv
 import os
 import pathlib
+import shutil
+import tempfile
+from os.path import join
 
 import cv2
 import shap
@@ -9,6 +13,10 @@ from pytorch_grad_cam.utils.image import show_cam_on_image
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from PIL import Image, ImageChops
 import matplotlib.pyplot as plt
+
+from xaipatimg.datagen.dbimg import load_db
+from xaipatimg.datagen.genimg import gen_img
+from xaipatimg.datagen.utils import get_coords_diff, PatImgObj
 from xaipatimg.ml import resnet18_preprocess_no_norm
 from xaipatimg.ml.learning import load_resnet18_based_model, get_dataset_transformed, make_prediction
 import numpy as np
@@ -49,6 +57,28 @@ def _get_subfolder(pred, true):
         return "FP"
     return None
 
+def _predict(model_dir, device, dataset):
+    """
+    Utility function to make predictions with the given model on the given dataset
+    :param model_dir: path of the model directory.
+    :param device: device to use for predictions.
+    :param dataset: dataset as a PatImgDataset instance.
+    :return: The input X and y matrices, the predicted y_pred vector and the model : X, y, y_pred, model
+    """
+    model = load_resnet18_based_model(model_dir, device)
+    X = np.array([dataset[i][0] for i in range(len(dataset))])
+    y = np.array([dataset[i][1] for i in range(len(dataset))])
+    input_tensor = torch.from_numpy(X)
+    input_tensor.to(device)
+
+    # Making the prediction with the model
+    y_pred = []
+    for i in range(len(X)):
+        pred, _ = make_prediction(model, input_tensor[i:i + 1], device)
+        y_pred.extend(pred)
+
+    return X, y, y_pred, model
+
 
 def generate_cam_resnet18(cam_technique, db_dir, dataset_filename, model_dir, device="cuda:0"):
     """
@@ -72,13 +102,12 @@ def generate_cam_resnet18(cam_technique, db_dir, dataset_filename, model_dir, de
     xai_output_path = os.path.join(model_dir, "xai_80%_" + pathlib.Path(dataset_filename).stem + "_" + cam_technique)
     _create_dirs(xai_output_path)
 
-    # Loading model
-    model = load_resnet18_based_model(model_dir, device)
-
     # Loading data
     dataset = get_dataset_transformed(db_dir, model_dir, dataset_filename)
-    X = np.array([dataset[i][0] for i in range(len(dataset))])
-    y = np.array([dataset[i][1] for i in range(len(dataset))])
+
+    # Make prediction
+    X, y, _, model = _predict(model_dir, device, dataset)
+
     input_tensor = torch.from_numpy(X)
     input_tensor.to(device)
     paths_list = [dataset.get_path(i) for i in range(len(dataset))]
@@ -112,10 +141,10 @@ def generate_cam_resnet18(cam_technique, db_dir, dataset_filename, model_dir, de
                 cv2.imwrite(os.path.join(curr_folder, str(i) + "_target_" + str(j) + ".jpg"), visualization)
 
 
-def _shap_single_sample(i, shap_values, img_numpy, xai_output_path, y_pred, y, shap_values_lim):
+def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_pred, y, shap_values_lim):
     """
     Compute and saves shap explanations for single sample of index i.
-    :param i: index of the sample.
+    :param sample_idx: index of the sample.
     :param shap_values: shap_values.
     :param img_numpy: current image as a numpy array for displaying in the plot
     :param xai_output_path: path where to save the results.
@@ -161,9 +190,9 @@ def _shap_single_sample(i, shap_values, img_numpy, xai_output_path, y_pred, y, s
     shap_expl_2 = process_img(im.crop((w_step * 2, 0, w_step * 3, h)))
 
     # Saving the images to disk
-    original_image.save(os.path.join(curr_folder, str(i + 1) + ".jpg"))
-    shap_expl_1.save(os.path.join(curr_folder, str(i + 1) + "target_" + "0" + ".jpg"))
-    shap_expl_2.save(os.path.join(curr_folder, str(i + 1) + "target_" + "1" + ".jpg"))
+    original_image.save(os.path.join(curr_folder, str(sample_idx + 1) + ".jpg"))
+    shap_expl_1.save(os.path.join(curr_folder, str(sample_idx + 1) + "target_" + "0" + ".jpg"))
+    shap_expl_2.save(os.path.join(curr_folder, str(sample_idx + 1) + "target_" + "1" + ".jpg"))
 
 
 def generate_shap_resnet18(db_dir, dataset_filename, model_dir, device="cuda:0", n_jobs=-1, dataset_size=None,
@@ -187,23 +216,13 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, device="cuda:0",
     xai_output_path = os.path.join(model_dir, "xai_80%_" + pathlib.Path(dataset_filename).stem + "_" + "shap_" + str(masker))
     _create_dirs(xai_output_path)
 
-    # Loading model
-    model = load_resnet18_based_model(model_dir, device)
-
     # Loading data
     dataset = get_dataset_transformed(db_dir, model_dir, dataset_filename, max_size=dataset_size)
-    X = np.array([dataset[i][0] for i in range(len(dataset))])
-    y = np.array([dataset[i][1] for i in range(len(dataset))])
-    input_tensor = torch.from_numpy(X)
-    input_tensor.to(device)
-    paths_list = [dataset.get_path(i) for i in range(len(dataset))]
-    Xtr = nchw_to_nhwc(torch.from_numpy(X))
 
-    # Making the prediction with the model
-    y_pred = []
-    for i in range(len(X)):
-        pred, _ = make_prediction(model, input_tensor[i:i + 1], device)
-        y_pred.extend(pred)
+    # Make prediction
+    X, y, y_pred, model = _predict(model_dir, device, dataset)
+
+    Xtr = nchw_to_nhwc(torch.from_numpy(X))
 
     def load_image_without_norm_add_border(image_path):
         image = Image.open(image_path)
@@ -212,6 +231,7 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, device="cuda:0",
 
     # Loading all the original images as a numpy array.
     # Adding a black border so that the content of the image won't be cropped when shap output images are generated
+    paths_list = [dataset.get_path(i) for i in range(len(dataset))]
     img_numpy = np.array([np.transpose(load_image_without_norm_add_border(paths_list[i]).numpy(), (0, 2, 3, 1)) for i in
                           range(len(X))]).squeeze()
 
@@ -251,3 +271,113 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, device="cuda:0",
     Parallel(n_jobs=n_jobs)(delayed(_shap_single_sample)(
         i, shap_values.values[i: i + 1], img_numpy[i: i + 1],
         xai_output_path, y_pred[i], y[i], (min_shap_value, max_shap_value)) for i in tqdm.tqdm(range(len(X))))
+
+
+def _cf_single_sample(db_dir, sample_idx, xai_output_path, counterfactual_fun, img_entry, y, y_pred, nb_cf, model_dir, device):
+    """
+    Generating a set of counterfactual explanations for a single sample.
+    :param db_dir: path of the database.
+    :param sample_idx: index of the sample.
+    :param xai_output_path: path where to save the xai explanations.
+    :param counterfactual_fun: function generating possible counterfactual explanations for the specific rule of
+    the dataset based on the image entry, the class of the sample and the number of possible counterfactuals to generate.
+    Expected signature : fun(img_entry, y, nb_cf).
+    :param img_entry: entry of the image in the database.
+    :param y: class of the sample.
+    :param y_pred: predicted class of the sample.
+    :param nb_cf: number of possible counterfactuals to generate.
+    :param model_dir: path of the model directory.
+    :param device: device to use for pytorch computation.
+    :return: None
+    """
+
+    # Generate possible counterfactuals
+    counterfactuals_dict_list = counterfactual_fun(img_entry, y_pred, nb_cf)
+
+    # Create the temporary directory and store the path
+    temp_dir = tempfile.mkdtemp()
+
+    # Saving the original image
+    og_img_path = join(temp_dir, "original.png")
+    gen_img(og_img_path, img_entry["content"], img_entry["division"], img_entry["size"])
+
+    possible_cf_paths = []
+    # Writing the possible counterfactuals into the temporary directory
+    for cf_id, cf_dict in enumerate(counterfactuals_dict_list):
+        curr_cf_path = join(temp_dir, str(cf_id) + ".png")
+        possible_cf_paths.append(curr_cf_path)
+        gen_img(curr_cf_path, cf_dict["content"], cf_dict["division"], cf_dict["size"])
+
+    # Writing a CSV dataset of counterfactuals to be able to pass them through the model
+    dataset_path = os.path.join(temp_dir, "dataset.csv")
+    y_cf = [None for _ in range(len(possible_cf_paths))] # These values will not be used so they are set to None
+    csv_content_train = np.array([np.concatenate((["path"], possible_cf_paths), axis=0),
+                                  np.concatenate((["class"], y_cf), axis=0)]).T
+    with open(dataset_path, 'w') as f:
+        writer = csv.writer(f)
+        writer.writerows(csv_content_train)
+
+    # Verifying that the generated samples are actual counterfactuals according to the model
+    dataset = get_dataset_transformed(db_dir, model_dir, dataset_path)
+    _, _, y_pred_cf, _ = _predict(model_dir, device, dataset)
+    actual_cf_idx_list = []
+    for y_pred_cf_idx, y_pred_curr_cf in enumerate(y_pred_cf):
+        # Exclusive or to check that the values are different
+        if bool(y_pred) ^ bool(y_pred_curr_cf):
+            actual_cf_idx_list.append(y_pred_cf_idx)
+
+    # Computing output path depending on target class and prediction
+    curr_folder = os.path.join(xai_output_path, _get_subfolder(y_pred, y))
+
+    # Copying the actual original image into the XAI output directory
+    shutil.copyfile(og_img_path, os.path.join(curr_folder, str(sample_idx + 1) + ".png"))
+
+    # Generating counterfactual images for every actual counterfactual. Highlighting the cells where the counterfactual
+    # differs from the original image.
+    for actual_cf_idx in actual_cf_idx_list:
+        cf_dict = counterfactuals_dict_list[actual_cf_idx]
+        coords_diff = get_coords_diff(PatImgObj(img_entry), PatImgObj(cf_dict))
+        gen_img(os.path.join(curr_folder, str(sample_idx + 1) + "cf_" + str(actual_cf_idx) + ".png"),
+                cf_dict["content"], cf_dict["division"], cf_dict["size"], to_highlight=coords_diff)
+
+    # Removing the temporary dictionary
+    shutil.rmtree(temp_dir)
+
+
+def generate_counterfactuals_resnet18(db_dir, dataset_filename, model_dir, counterfactual_fun, nb_cf,
+                                      device="cuda:0", n_jobs=-1, dataset_size=None):
+    """
+    Generating counterfactual explanations for the given model and dataset.
+    :param db_dir: root of the database.
+    :param dataset_filename: filename of the dataset.
+    :param model_dir: path of the model directory.
+    :param counterfactual_fun : function generating possible counterfactual explanations for the specific rule of
+    the dataset based on the image entry, the class of the sample and the number of possible counterfactuals to generate.
+    Expected signature : fun(img_entry, y, nb_cf).
+    :param nb_cf : maximum number of counterfactual explanations to be generated for every sample. nb_cf possible
+    counterfactual will be generated, but only those which are actual counterfactuals according to the model will be
+    saved to the disk.
+    :param device: device to use for pytorch computation.
+    :param n_jobs: number of jobs to run in parallel.
+    :param dataset_size: elements of the dataset are loaded until the size reaches this value. If None, the whole
+    dataset is loaded.
+    :return: None.
+    """
+
+    # Creating directories
+    xai_output_path = os.path.join(model_dir, "xai_" + pathlib.Path(dataset_filename).stem + "_" + "cf")
+    _create_dirs(xai_output_path)
+
+    # Loading data
+    dataset = get_dataset_transformed(db_dir, model_dir, dataset_filename, max_size=dataset_size)
+
+    # Make prediction
+    X, y, y_pred, model = _predict(model_dir, device, dataset)
+
+    # Load database
+    db = load_db(db_dir)
+
+    # Parallel computation of the images for the whole dataset.
+    print("Generating counterfactual images")
+    Parallel(n_jobs=n_jobs)(delayed(_cf_single_sample)(
+        db_dir, i, xai_output_path, counterfactual_fun, db[dataset.get_id(i)], y[i], y_pred[i], nb_cf, model_dir, device) for i in tqdm.tqdm(range(len(X))))
