@@ -351,7 +351,7 @@ def gen_img_and_save_db(db, db_dir, overwrite=False, n_jobs=1):
 
     save_db(db=db, db_dir=db_dir)
 # from xaipatimg.datagen.genimg import gen_img_and_save_db
-gen_img_and_save_db(db, db_dir, overwrite=True, n_jobs=190)
+gen_img_and_save_db(db, db_dir, overwrite=False, n_jobs=190)
 
 # print(db)
 
@@ -514,8 +514,8 @@ csv_only_circle_train = "onlycircle_train.csv"
 csv_only_circle_test = "onlycircle_test.csv"
 csv_only_circle_valid = "onlycircle_valid.csv"
 sample_img_path = os.path.join(db_dir, "datasets", "onlycircle_train")
-create_dataset_based_on_rule(db_dir, csv_only_circle_train, csv_only_circle_test, csv_only_circle_valid, test_size=100, valid_size=100,
-                             dataset_pos_samples_nb=719, dataset_neg_samples_nb=719, rule_fun=row_only_circles_rule)
+create_dataset_based_on_rule(db_dir, csv_only_circle_train, csv_only_circle_test, csv_only_circle_valid, test_size=4000, valid_size=4000,
+                             dataset_pos_samples_nb=12000, dataset_neg_samples_nb=12000, rule_fun=row_only_circles_rule)
 
 """
 Create a dataset where If row 2 contains at least one red symbol, Rule 1 applies; otherwise, Rule 2 applies:
@@ -554,8 +554,8 @@ csv_red_in_row_2_train = "red_in_row_2_train.csv"
 csv_red_in_row_2_test = "red_in_row_2_test.csv"
 csv_red_in_row_2_valid = "red_in_row_2_valid.csv"
 sample_img_path = os.path.join(db_dir, "datasets", "red_in_row_2_train")
-create_dataset_based_on_rule(db_dir, csv_red_in_row_2_train, csv_red_in_row_2_test, csv_red_in_row_2_valid, test_size=100, valid_size=100,
-                             dataset_pos_samples_nb=759, dataset_neg_samples_nb=759, rule_fun=red_in_row_2_rule)
+create_dataset_based_on_rule(db_dir, csv_red_in_row_2_train, csv_red_in_row_2_test, csv_red_in_row_2_valid, test_size=4000, valid_size=4000,
+                             dataset_pos_samples_nb=12000, dataset_neg_samples_nb=12000, rule_fun=red_in_row_2_rule)
 
 # """
 # Create a dataset based on blue diagonal rule
