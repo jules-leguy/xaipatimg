@@ -32,8 +32,14 @@ To generate the images, the user must specify their content represented in a str
 
 """###Load and Save Database
 """
-from xaipatimg.datagen.dbimg import load_db
+# from xaipatimg.datagen.dbimg import load_db
 import json
+import uuid
+import os
+
+def generate_uuid():
+    return str(uuid.uuid1().hex)
+
 def load_db(db_dir):
     """
     Load the database from the given path. If the file does not exist, returns an empty DB.
