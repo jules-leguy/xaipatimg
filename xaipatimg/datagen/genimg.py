@@ -1,3 +1,4 @@
+from PIL import Image, ImageDraw, ImageFont, __file__ as PIL_FILE
 from PIL import Image, ImageDraw
 from xaipatimg.datagen.dbimg import save_db
 import math
@@ -6,14 +7,22 @@ import tqdm
 from joblib import Parallel, delayed
 
 # Function to draw a circle
+
+
 def draw_circle(draw, x, y, size, color):
-    draw.ellipse([x - size*0.8, y - size*0.8, x + size*0.8, y + size*0.8], fill=color, outline=color)
+    draw.ellipse([x - size*0.8, y - size*0.8, x + size*0.8,
+                 y + size*0.8], fill=color, outline=color)
 
 # Function to draw a square
+
+
 def draw_square(draw, x, y, size, color):
-    draw.rectangle([x - size*0.7, y - size*0.7, x + size*0.7, y + size*0.7], fill=color, outline=color)
+    draw.rectangle([x - size*0.7, y - size*0.7, x + size*0.7,
+                   y + size*0.7], fill=color, outline=color)
 
 # Function to draw a triangle
+
+
 def draw_triangle(draw, x, y, size, color):
     half_size = size*0.8 / 2
     height = size*0.8 * math.sqrt(3) / 2
@@ -22,7 +31,8 @@ def draw_triangle(draw, x, y, size, color):
               (x + half_size, y + height / 2)]
     draw.polygon(points, fill=color, outline=color)
 
-def gen_img(img_path, content, division=(4,7), dimension=(400, 700), to_highlight=None, overwrite=False):
+
+def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), overwrite=False):
     """
     Generate an image that fits the given features.
     :param img_path: path where to save the generated image.
@@ -30,11 +40,9 @@ def gen_img(img_path, content, division=(4,7), dimension=(400, 700), to_highligh
     shapes in the picture.
     :param division: tuple that describes the number of horizontal and vertical divisions.
     :param dimension: tuple that describes the size of the image in pixels.
-    :param to_highlight: List of (x, y) positions to highlight (optional).
     :param overwrite: whether to overwrite existing images. If False, no action will be taken if the image already exists.
     :return: None
     """
-    to_highlight = set(to_highlight or [])
 
     # Exit if the file already exists and overwrite is set to False
     already_exists = os.path.exists(img_path)
@@ -42,20 +50,65 @@ def gen_img(img_path, content, division=(4,7), dimension=(400, 700), to_highligh
         return
 
     img_dir_path = os.path.dirname(img_path)
-    if not os.path.exists(img_dir_path):
-        os.makedirs(img_dir_path)
+    os.makedirs(img_dir_path, exist_ok=True)
 
     # Create a blank white image
     img = Image.new("RGB", dimension, color="white")
     draw = ImageDraw.Draw(img)
 
+    # Add padding for labels and define grid area
+    font_size = 25
+    padding = 50
+
+    # define width and height insdide the padding, so subtract padding from both sides (left & right, top & bottom)
+    grid_area_width = dimension[0] - padding * 2
+    grid_area_height = dimension[1] - padding * 2
+    grid_origin_x = padding
+    grid_origin_y = padding
+
     # Define grid cell size
-    cell_width = dimension[0] / division[0]
-    cell_height = dimension[1] / division[1]
+    cell_width = grid_area_width / division[0]
+    cell_height = grid_area_height / division[1]
+
+    # draw the grid line
+    for i in range(division[0] + 1):          # verticals
+        x0 = grid_origin_x + i * cell_width
+        y0 = grid_origin_y
+        x1 = x0
+        y1 = grid_origin_y + grid_area_height
+        draw.line([(x0, y0), (x1, y1)], fill="black", width=1)
+
+    for j in range(division[1] + 1):          # horizontals
+        x0 = grid_origin_x
+        y0 = grid_origin_y + j * cell_height
+        x1 = grid_origin_x + grid_area_width
+        y1 = y0
+        draw.line([(x0, y0), (x1, y1)], fill="black", width=1)
+
+    # draw labels
+    try:
+        font = ImageFont.truetype(
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", font_size)
+    except IOError:
+        print("Warning: LiberationSans-Regular.ttf not found. Falling back to the default font.")
+        font = ImageFont.load_default()
+
+    # Columns: A, B, C, …
+    for col in range(division[0]):
+        label = chr(ord('A') + col)
+        x = grid_origin_x + (col + 0.5) * cell_width   # column centre
+        y = grid_origin_y - (padding / 2.2)
+        draw.text((x, y), label, fill="gray", font=font, anchor="ms")
+
+    # Rows: 1, 2, 3, …
+    for row in range(division[1]):
+        label = str(row + 1)
+        x = grid_origin_x - (padding / 2.2)
+        y = grid_origin_y + (row + 0.5) * cell_height   # row centre
+        draw.text((x, y), label, fill="gray", font=font, anchor="rm")
 
     # Define shape size
-    shape_size = 0.7 * max(cell_width, cell_height)
-    highlight_margin = 0.15 * shape_size  # margin around shape
+    shape_size = 0.7 * min(cell_width, cell_height)
 
     # Iterating over all the shapes to draw
     for c in content:
@@ -66,8 +119,8 @@ def gen_img(img_path, content, division=(4,7), dimension=(400, 700), to_highligh
         color = c["color"]
 
         # Calculate the center of the current grid cell
-        x_center = (x + 0.5) * cell_width
-        y_center = (y + 0.5) * cell_height
+        x_center = grid_origin_x + (x + 0.5) * cell_width
+        y_center = grid_origin_y + (y + 0.5) * cell_height
 
         # Draw the shape
         if shape == 'circle':
@@ -77,21 +130,80 @@ def gen_img(img_path, content, division=(4,7), dimension=(400, 700), to_highligh
         elif shape == 'triangle':
             draw_triangle(draw, x_center, y_center, shape_size, color)
 
-    # Iterating over cells to highlight
-    for (x, y) in to_highlight:
-
-        # Calculate the center of the current grid cell
-        x_center = (x + 0.5) * cell_width
-        y_center = (y + 0.5) * cell_height
-
-        outer_r = shape_size / 2 + highlight_margin
-        draw.ellipse(
-            (x_center - outer_r, y_center - outer_r, x_center + outer_r, y_center + outer_r),
-            outline=(153, 153, 153), width=3
-        )
-
     # Save the image
     img.save(img_path)
+
+# def gen_img(img_path, content, division=(4,7), dimension=(400, 700), to_highlight=None, overwrite=False):
+#     """
+#     Generate an image that fits the given features.
+#     :param img_path: path where to save the generated image.
+#     :param content: data structure that describes the content of the image (coordinates and description of geometrical
+#     shapes in the picture.
+#     :param division: tuple that describes the number of horizontal and vertical divisions.
+#     :param dimension: tuple that describes the size of the image in pixels.
+#     :param to_highlight: List of (x, y) positions to highlight (optional).
+#     :param overwrite: whether to overwrite existing images. If False, no action will be taken if the image already exists.
+#     :return: None
+#     """
+#     to_highlight = set(to_highlight or [])
+
+#     # Exit if the file already exists and overwrite is set to False
+#     already_exists = os.path.exists(img_path)
+#     if already_exists and not overwrite:
+#         return
+
+#     img_dir_path = os.path.dirname(img_path)
+#     if not os.path.exists(img_dir_path):
+#         os.makedirs(img_dir_path)
+
+#     # Create a blank white image
+#     img = Image.new("RGB", dimension, color="white")
+#     draw = ImageDraw.Draw(img)
+
+#     # Define grid cell size
+#     cell_width = dimension[0] / division[0]
+#     cell_height = dimension[1] / division[1]
+
+#     # Define shape size
+#     shape_size = 0.7 * max(cell_width, cell_height)
+#     highlight_margin = 0.15 * shape_size  # margin around shape
+
+#     # Iterating over all the shapes to draw
+#     for c in content:
+
+#         # Extracting the features of the current shape to draw
+#         x, y = c["pos"]
+#         shape = c["shape"]
+#         color = c["color"]
+
+#         # Calculate the center of the current grid cell
+#         x_center = (x + 0.5) * cell_width
+#         y_center = (y + 0.5) * cell_height
+
+#         # Draw the shape
+#         if shape == 'circle':
+#             draw_circle(draw, x_center, y_center, shape_size / 2, color)
+#         elif shape == 'square':
+#             draw_square(draw, x_center, y_center, shape_size / 2, color)
+#         elif shape == 'triangle':
+#             draw_triangle(draw, x_center, y_center, shape_size, color)
+
+#     # Iterating over cells to highlight
+#     for (x, y) in to_highlight:
+
+#         # Calculate the center of the current grid cell
+#         x_center = (x + 0.5) * cell_width
+#         y_center = (y + 0.5) * cell_height
+
+#         outer_r = shape_size / 2 + highlight_margin
+#         draw.ellipse(
+#             (x_center - outer_r, y_center - outer_r, x_center + outer_r, y_center + outer_r),
+#             outline=(153, 153, 153), width=3
+#         )
+
+#     # Save the image
+#     img.save(img_path)
+
 
 def gen_img_and_save_db(db, db_dir, overwrite=False, n_jobs=1):
     """

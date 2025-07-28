@@ -29,43 +29,9 @@ param db = python dict used to store the information of image
 To generate the images, the user must specify their content represented in a structured format (python dict or json file).
 """
 
-# db = {}
 
 """###Load and Save Database
-from xaipatimg.datagen.dbimg import load_db
 """
-
-# import json
-# import uuid
-# import os
-
-# def generate_uuid():
-#     return str(uuid.uuid1().hex)
-
-# def load_db(db_dir):
-#     """
-#     Load the database from the given path. If the file does not exist, returns an empty DB.
-#     the purpose of load db is to access the db.json
-#     :param db_dir: path to the root directory of the database
-#     :return: database object
-#     """
-#     try:
-#         with open(os.path.join(db_dir, "db.json")) as json_file:
-#             json_data = json.load(json_file)
-#             return json_data
-#     except FileNotFoundError:
-#         return {}
-# from xaipatimg.datagen.dbimg import save_db
-def save_db(db_dir, db):
-    """
-    Save the given database to the given path
-    :param db_dir: path to the root directory of the database
-    :param db: database object
-    :return: None
-    """
-    with open(os.path.join(db_dir, "db.json"), 'w', encoding='utf-8') as f:
-        json.dump(db, f, ensure_ascii=False, indent=4)
-
 from xaipatimg.datagen.dbimg import load_db
 db = load_db(db_dir)
 
@@ -128,72 +94,6 @@ while to_generate > 0:
 print("unique generated in DB : " + str(len(db)))
 print("duplicates avoided : " + str(duplicate_count))
 
-"""Define shape functions"""
-
-import math
-# Function to draw a circle
-def draw_circle(draw, x, y, size, color):
-    draw.ellipse([x - size*0.8, y - size*0.8, x + size*0.8, y + size*0.8], fill=color, outline=color)
-
-# Function to draw a square
-def draw_square(draw, x, y, size, color):
-    draw.rectangle([x - size*0.7, y - size*0.7, x + size*0.7, y + size*0.7], fill=color, outline=color)
-
-# Function to draw a triangle
-def draw_triangle(draw, x, y, size, color):
-    half_size = size*0.8 / 2
-    height = size*0.8 * math.sqrt(3) / 2
-    points = [(x, y - height / 2),
-              (x - half_size, y + height / 2),
-              (x + half_size, y + height / 2)]
-    draw.polygon(points, fill=color, outline=color)
-
-# import numpy as np
-# import os
-
-# """
-#  Preaping the information needed to generate an image
-#  :param unique_content_generated:make sure that no image is generated twice
-#  :param to generate: number of image to generate
-#  :param content: stores the information including shape, position and color of the image
-# """
-
-# to_generate = NBGEN
-# unique_content_generated = {}
-# duplicate_count = 0
-# while to_generate > 0:
-#     content = []
-#     for i in range(X_DIVISIONS):
-#         for j in range(Y_DIVISIONS):
-#             if np.random.random() < SHAPE_PROB:
-#                 content.append({
-#                     "shape": np.random.choice(SHAPES),
-#                     "pos": (i, j),
-#                     "color": np.random.choice(COLORS)
-#                 })
-
-#     if str(content) in unique_content_generated:
-#         duplicate_count += 1
-#         continue
-
-#     imgid = generate_uuid()
-#     db[imgid] = {
-#         "path": os.path.join("img", imgid + ".png"),
-#         "division" : (X_DIVISIONS, Y_DIVISIONS),
-#         "size": img_size,
-#         "content": content
-#     }
-
-#     unique_content_generated[str(content)] = True
-#     to_generate -= 1
-
-# print("unique generated in DB : " + str(len(db)))
-# print("duplicates avoided : " + str(duplicate_count))
-
-# print(len(db))
-# for imgid, info in list(db.items())[:3]:  # Show first 3
-#     print(f"Content for {imgid}: {info['content']}")
-
 """Validating no duplicate is found"""
 
 import tqdm
@@ -209,283 +109,16 @@ for k, v in tqdm.tqdm(db.items()):
 
 print(nb_duplicates)
 
-"""## Generate image
-from xaipatimg.datagen.genimg import gen_img_and_save_db
-"""
-
-from PIL import Image, ImageDraw, ImageFont, __file__ as PIL_FILE
-def gen_img(img_path, content, division=(6,6), dimension=(700, 700), overwrite=False):
-    """
-    Generate an image that fits the given features.
-    :param img_path: path where to save the generated image.
-    :param content: data structure that describes the content of the image (coordinates and description of geometrical
-    shapes in the picture.
-    :param division: tuple that describes the number of horizontal and vertical divisions.
-    :param dimension: tuple that describes the size of the image in pixels.
-    :param overwrite: whether to overwrite existing images. If False, no action will be taken if the image already exists.
-    :return: None
-    """
-
-    # Exit if the file already exists and overwrite is set to False
-    already_exists = os.path.exists(img_path)
-    if already_exists and not overwrite:
-        return
-
-    img_dir_path = os.path.dirname(img_path)
-    os.makedirs(img_dir_path, exist_ok=True)
-
-    # Create a blank white image
-    img = Image.new("RGB", dimension, color="white")
-    draw = ImageDraw.Draw(img)
-
-    # Add padding for labels and define grid area
-    font_size = 25
-    padding = 50
-    grid_area_width = dimension[0] - padding * 2
-    grid_area_height = dimension[1] - padding * 2
-    grid_origin_x = padding
-    grid_origin_y = padding
-
-    # Define grid cell size
-    cell_width = grid_area_width / division[0]
-    cell_height = grid_area_height / division[1]
-
-    #draw the grid line
-    for i in range(division[0] + 1):          # verticals
-      x0 = grid_origin_x + i * cell_width
-      y0 = grid_origin_y
-      x1 = x0
-      y1 = grid_origin_y + grid_area_height
-      draw.line([(x0, y0), (x1, y1)], fill="black", width=1)
-
-    for j in range(division[1] + 1):          # horizontals
-        x0 = grid_origin_x
-        y0 = grid_origin_y + j * cell_height
-        x1 = grid_origin_x + grid_area_width
-        y1 = y0
-        draw.line([(x0, y0), (x1, y1)], fill="black", width=1)
-
-    #draw labels
-    try:
-        # Using "DejaVuSans.ttf" as it's a common font in Colab/Linux environments.
-        font = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", font_size)
-    except IOError:
-        # If the font is not found, it falls back to the default, small bitmap font.
-        # The font_size parameter will have no effect in this case.
-        print("Warning: LiberationSans-Regular.ttf not found. Falling back to the default font.")
-        font = ImageFont.load_default()
-    # try:
-    #     dejavu_path = os.path.join(os.path.dirname(PIL_FILE), "fonts", "DejaVuSans-Bold.ttf")
-    #     font = ImageFont.truetype(dejavu_path, font_size)
-    #     # font = ImageFont.truetype("arial.ttf", font_size)
-    # except IOError:
-    #     font = ImageFont.load_default()
-
-    # Columns: A, B, C, …
-    for col in range(division[0]):
-        label = chr(ord('A') + col)
-        x = grid_origin_x + (col + 0.5) * cell_width   # column centre
-        # y = grid_origin_y - 25                     # above the grid
-        y = grid_origin_y - (padding / 2.2)
-        draw.text((x, y), label, fill="gray", font=font, anchor="ms")
-
-    # Rows: 1, 2, 3, …
-    for row in range(division[1]):
-        label = str(row + 1)
-        # x = grid_origin_x - 25                     # left of the grid
-        x = grid_origin_x - (padding / 2.2)
-        y = grid_origin_y + (row + 0.5) * cell_height   # row centre
-        draw.text((x, y), label, fill="gray", font=font, anchor="rm")
-
-
-
-
-    # Define shape size
-    # shape_size = 0.7 * max(cell_width, cell_height)
-    shape_size = 0.7 * min(cell_width, cell_height)
-
-    # Iterating over all the shapes to draw
-    for c in content:
-
-        # Extracting the features of the current shape to draw
-        x, y = c["pos"]
-        shape = c["shape"]
-        color = c["color"]
-
-        # Calculate the center of the current grid cell
-        # x_center = (x + 0.5) * cell_width
-        # y_center = (y + 0.5) * cell_height
-        x_center = grid_origin_x + (x + 0.5) * cell_width
-        y_center = grid_origin_y + (y + 0.5) * cell_height
-
-        # Draw the shape
-        if shape == 'circle':
-            draw_circle(draw, x_center, y_center, shape_size / 2, color)
-        elif shape == 'square':
-            draw_square(draw, x_center, y_center, shape_size / 2, color)
-        elif shape == 'triangle':
-            draw_triangle(draw, x_center, y_center, shape_size, color)
-
-    # Save the image
-    img.save(img_path)
     
-# from xaipatimg.datagen.dbimg import save_db
-from joblib import Parallel, delayed
-def gen_img_and_save_db(db, db_dir, overwrite=False, n_jobs=1):
-    """
-    Generate every image from the DB.
-    :param db_dir: path to the root of the DB
-    :param db: database of image information and location
-    :param overwrite: whether to overwrite existing images. If False, the images that already exist in the filesystem
-    are ignored by this function.
-    :param n_jobs: number of jobs to run in parallel.
-    :return:
-    """
-    img_data_list = list(db.values())
-
-    Parallel(n_jobs=n_jobs)(delayed(gen_img)(os.path.join(db_dir, img_data_list[i]["path"]),
-                                             img_data_list[i]["content"],
-                                             img_data_list[i]["division"], img_data_list[i]["size"],
-                                             overwrite) for i in tqdm.tqdm(range(len(img_data_list))))
-    # Parallel generation of the images
-
-    save_db(db=db, db_dir=db_dir)
-# from xaipatimg.datagen.genimg import gen_img_and_save_db
+from xaipatimg.datagen.genimg import gen_img_and_save_db
 gen_img_and_save_db(db, db_dir, overwrite=False, n_jobs=190)
 
-# print(db)
 
 """## Create Dataset
-rules: blue diagonal,2 triangles + 3 non-red squares, Only yellow + red shapes, As many squares as there are (square can be in many colors) as blue shapes (it can be any shape)
-
-from xaipatimg.datagen.gendataset import create_dataset_based_on_rule
+rules: at least one row contains only circle, and if row 2 contains red symbols if it does rule 1 applies otherwise rule 2 applies
 """
-
-import numpy as np
 import csv
-
-# import tqdm
-# import shutil
-# import os
-# from sklearn.model_selection import train_test_split
-
-# def create_dataset_based_on_rule(db_dir, csv_filename_train, csv_filename_test, csv_filename_valid, test_size,
-#                                  valid_size, dataset_pos_samples_nb, dataset_neg_samples_nb, rule_fun, random_seed=42):
-#     """
-#     Function that creates a training dataset based on the rule that is defined in the rule_fun function. The dataset is
-#     saved as a csv file and contains a given number of positive and negative samples.
-#     :param db_dir: path to the root directory of the database.
-#     :param csv_filename_train: name of the csv file that contains the training dataset.
-#     :param csv_filename_test: name of the csv file that contains the testing dataset.
-#     :param csv_filename_valid: name of the csv file that contains the validation dataset.
-#     :param test_size: number of samples or proportion of the data to be put in the validation set.
-#     :param valid_size: number of samples or proportion of the dataset to be put in the validation set (in proportion of
-#     the data that has not been put in the test set).
-#     :param dataset_pos_samples_nb: number of positive samples to be contained in the dataset.
-#     :param dataset_neg_samples_nb: number of negative samples to be contained in the dataset.
-#     :param rule_fun: boolean function that defines whether the given image content is positive or negative.
-#     :param random_seed: seed which is used for dataset random ordering.
-#     :return: None
-#     """
-#     # Load and shuffle images content
-#     db = load_db(db_dir)
-#     img_content_list = list(db.values())
-#     np.random.seed(random_seed)
-#     np.random.shuffle(img_content_list)
-
-#     pos_list = []
-#     neg_list = []
-#     pos_nb = 0
-#     neg_nb = 0
-
-#     # Extracting positive and negative samples
-#     for img_content in tqdm.tqdm(img_content_list):
-#         is_positive = rule_fun(img_content["content"])
-#         if is_positive:
-#             if pos_nb < dataset_pos_samples_nb:
-#                 pos_list.append(img_content["path"])
-#             pos_nb += 1
-#         else:
-#             if neg_nb < dataset_neg_samples_nb:
-#                 neg_list.append(img_content["path"])
-#             neg_nb += 1
-
-#     print("Total number of positive instances found in database : " + str(pos_nb))
-#     print("Total number of negative instances found in database : " + str(neg_nb))
-
-#     if len(pos_list) != dataset_pos_samples_nb or len(neg_list) != dataset_neg_samples_nb:
-#         raise RuntimeError("Could not extract enough positive (" + str(pos_nb) + "/" + str(dataset_pos_samples_nb) +
-#                            ") or negative (" + str(neg_nb) + "/" + str(dataset_neg_samples_nb) +") samples.")
-
-#     # Forming dataset content
-#     y = np.concatenate((np.full(len(pos_list), 1), np.full(len(neg_list), 0)), axis=0)
-#     img_list = np.concatenate((pos_list, neg_list), axis=0)
-
-#     # Making sure all the data is unique before splitting it into train/test/valid sets
-#     assert len(np.unique(img_list)) == len(img_list)
-
-#     # Splitting training, testing and validation sets
-#     img_list_nontest, img_list_test, y_nontest, y_test = train_test_split(img_list, y,
-#                                                                           test_size=test_size, random_state=random_seed,
-#                                                                           stratify=y)
-#     img_list_train, img_list_valid, y_train, y_valid = train_test_split(img_list_nontest, y_nontest,
-#                                                                         test_size=valid_size, random_state=random_seed,
-#                                                                         stratify=y_nontest)
-
-#     csv_content_train = np.array([np.concatenate((["path"], img_list_train), axis=0),
-#                                   np.concatenate((["class"], y_train), axis=0)]).T
-
-#     csv_content_test = np.array([np.concatenate((["path"], img_list_test), axis=0),
-#                                  np.concatenate((["class"], y_test), axis=0)]).T
-
-#     csv_content_valid = np.array([np.concatenate((["path"], img_list_valid), axis=0),
-#                                   np.concatenate((["class"], y_valid), axis=0)]).T
-
-#     # Writing dataset to CSV files
-#     os.makedirs(os.path.join(db_dir, "datasets"), exist_ok=True)
-#     with open(os.path.join(db_dir, "datasets", csv_filename_train), 'w') as f:
-#         writer = csv.writer(f)
-#         writer.writerows(csv_content_train)
-#     with open(os.path.join(db_dir, "datasets", csv_filename_test), 'w') as f:
-#         writer = csv.writer(f)
-#         writer.writerows(csv_content_test)
-#     with open(os.path.join(db_dir, "datasets", csv_filename_valid), 'w') as f:
-#         writer = csv.writer(f)
-#         writer.writerows(csv_content_valid)
-
-# def extract_sample_from_dataset(db_dir, csv_filename, output_dir_path, pos_samples_nb, neg_samples_nb):
-#     """
-#     Function that copies samples from the given dataset in order to visualize the images.
-#     :param db_dir: path to the root directory of the database.
-#     :param csv_filename: name of the csv file contained in the database folder.
-#     :param output_dir_path: path where to save the sample of the dataset.
-#     :param pos_samples_nb: number of positive samples to extract.
-#     :param neg_samples_nb: number of negative samples to extract.
-#     :return: None
-#     """
-#     pos_nb = 0
-#     neg_nb = 0
-#     pos_dir_path = os.path.join(output_dir_path, "positive")
-#     neg_dir_path = os.path.join(output_dir_path, "negative")
-
-#     # Create directories if they don't exist
-#     if not os.path.exists(output_dir_path):
-#         os.makedirs(output_dir_path)
-#     if not os.path.exists(pos_dir_path):
-#         os.makedirs(pos_dir_path)
-#     if not os.path.exists(neg_dir_path):
-#         os.makedirs(neg_dir_path)
-
-#     # Copy files
-#     with open(os.path.join(db_dir, "datasets", csv_filename), "r") as csv_file:
-#         csv_reader = csv.reader(csv_file, delimiter=',')
-#         for row in tqdm.tqdm(csv_reader):
-#             if row[1] == "1" and pos_nb < pos_samples_nb:
-#                 shutil.copyfile(os.path.join(db_dir, row[0]), os.path.join(pos_dir_path, os.path.basename(row[0])))
-#                 pos_nb += 1
-#             elif row[1] == "0" and neg_nb < neg_samples_nb:
-#                 shutil.copyfile(os.path.join(db_dir, row[0]), os.path.join(neg_dir_path, os.path.basename(row[0])))
-#                 neg_nb += 1
+import json
 
 """Define Rules and generate dataset"""
 
@@ -524,6 +157,7 @@ Rule 2: The number of green symbols is greater than or equal to the number of sq
 """
 def red_in_row_2_rule(img_content):
     red_in_row_2 = False
+    #find if row 2 contains any red symbols
     for c in img_content:
         if c['pos'][1] == 1 and c['color'] == "#F86C62":
             red_in_row_2 = True
@@ -557,96 +191,9 @@ sample_img_path = os.path.join(db_dir, "datasets", "red_in_row_2_train")
 create_dataset_based_on_rule(db_dir, csv_red_in_row_2_train, csv_red_in_row_2_test, csv_red_in_row_2_valid, test_size=4000, valid_size=4000,
                              dataset_pos_samples_nb=12000, dataset_neg_samples_nb=12000, rule_fun=red_in_row_2_rule)
 
-# """
-# Create a dataset based on blue diagonal rule
-# """
-# def blue_diagonal_rule(img_content):
-#     symbols_in_diagonal = 0
-#     for c in img_content:
-#         if c["pos"][0] == c["pos"][1]:
-#             symbols_in_diagonal += 1
-#             if c["color"] != "#7AB0CD":
-#                 return False
-#     return symbols_in_diagonal >= 1
-
-# csv_blue_diagonal_train = "bluediagonal_train.csv"
-# csv_blue_diagonal_test = "bluediagonal_test.csv"
-# csv_blue_diagonal_valid = "bluediagonal_valid.csv"
-# sample_img_path = os.path.join(db_dir, "datasets", "bluediagonal_train")
-# create_dataset_based_on_rule(db_dir, csv_blue_diagonal_train, csv_blue_diagonal_test, csv_blue_diagonal_valid, test_size=800, valid_size=800,
-#                              dataset_pos_samples_nb=2000, dataset_neg_samples_nb=2000, rule_fun=blue_diagonal_rule)
-
-# """
-# Create a dataset with exactly 6 squares
-# """
-# def exactly_6_squares_rule(img_content):
-#   nb_square = 0
-#   for c in img_content:
-#     if c["shape"] == "square":
-#       nb_square += 1
-#   return nb_square == 6
-
-# csv_exactly_6_squares_train = "exactly_6_squares_train.csv"
-# csv_exactly_6_squares_test = "exactly_6_squares_test.csv"
-# csv_exactly_6_squares_valid = "exactly_6_squares_valid.csv"
-# sample_img_path = os.path.join(db_dir, "datasets", "exactly_6_squares_train")
-# create_dataset_based_on_rule(db_dir, csv_exactly_6_squares_train, csv_exactly_6_squares_test, csv_exactly_6_squares_valid, test_size=3200, valid_size=3200,
-#                              dataset_pos_samples_nb=4000, dataset_neg_samples_nb=4000, rule_fun=exactly_6_squares_rule)
-
-# """
-# Create a dataset with exactly 6 red symbols
-# """
-# def exactly_6_red_symbols_rule(img_content):
-#   nb_red = 0
-#   for c in img_content:
-#     if c["color"] == "#F86C62":
-#       nb_red += 1
-#   return nb_red == 6
-
-# csv_exactly_6_red_symbols_train = "exactly_6_red_symbols_train.csv"
-# csv_exactly_6_red_symbols_test = "exactly_6_red_symbols_test.csv"
-# csv_exactly_6_red_symbols_valid = "exactly_6_red_symbols_valid.csv"
-# sample_img_path = os.path.join(db_dir, "datasets", "exactly_6_red_symbols_train")
-# create_dataset_based_on_rule(db_dir, csv_exactly_6_red_symbols_train, csv_exactly_6_red_symbols_test, csv_exactly_6_red_symbols_valid, test_size=3200, valid_size=3200,
-#                              dataset_pos_samples_nb=4000, dataset_neg_samples_nb=4000, rule_fun= exactly_6_red_symbols_rule)
-
-# """
-# Create a dataset with twice as many green symbols as red symbols.
-# """
-# def twice_as_many_green_as_red_rule(img_content):
-#   nb_green = 0
-#   nb_red = 0
-#   for c in img_content:
-#     if c["color"] == "#87C09C":
-#       nb_green += 1
-#     if c["color"] == "#F86C62":
-#       nb_red += 1
-#   return nb_green == 2*nb_red
-
-# csv_name_train = "twice_as_many_green_as_red_train.csv"
-# csv_name_test = "twice_as_many_green_as_red_test.csv"
-# csv_name_valid = "twice_as_many_green_as_red_valid.csv"
-# sample_img_path = os.path.join(db_dir, "datasets", "twice_as_many_green_as_red_train")
-# create_dataset_based_on_rule(db_dir, csv_name_train, csv_name_test, csv_name_valid, test_size=800, valid_size=800,
-#                              dataset_pos_samples_nb=2000, dataset_neg_samples_nb=2000, rule_fun= twice_as_many_green_as_red_rule)
 
 """Extract sample"""
 from xaipatimg.datagen.gendataset import extract_sample_from_dataset
-
-# For twice_as_many_green_as_red
-# sample_img_path = os.path.join(db_dir, "datasets", "twice_as_many_green_as_red_train")
-# extract_sample_from_dataset(db_dir, csv_name_train, output_dir_path=sample_img_path, pos_samples_nb=20, neg_samples_nb=20)
-
-# # For exactly_6_red_symbols
-# sample_img_path = os.path.join(db_dir, "datasets", "exactly_6_red_symbols_train")
-# extract_sample_from_dataset(db_dir, csv_exactly_6_red_symbols_train, output_dir_path=sample_img_path, pos_samples_nb=20, neg_samples_nb=20)
-
-# extract_sample_from_dataset(db_dir, csv_exactly_6_squares_train, output_dir_path=sample_img_path, pos_samples_nb=20, neg_samples_nb=20)
-
-# extract_sample_from_dataset(db_dir, csv_blue_diagonal_train, output_dir_path=sample_img_path, pos_samples_nb=20, neg_samples_nb=20)
-
-# sample_img_path = os.path.join(db_dir, "datasets", "only_circle_train")
-# extract_sample_from_dataset(db_dir, csv_only_circle_train, output_dir_path=sample_img_path, pos_samples_nb=20, neg_samples_nb=20)
 
 sample_img_path = os.path.join(db_dir, "datasets", "only_circle_train")
 extract_sample_from_dataset(db_dir, csv_only_circle_train, output_dir_path=sample_img_path, pos_samples_nb=20, neg_samples_nb=20)
