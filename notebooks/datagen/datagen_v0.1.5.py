@@ -111,7 +111,7 @@ print(nb_duplicates)
 
     
 from xaipatimg.datagen.genimg import gen_img_and_save_db
-gen_img_and_save_db(db, db_dir, overwrite=False, n_jobs=190)
+gen_img_and_save_db(db, db_dir, overwrite=True, n_jobs=190)
 
 
 """## Create Dataset
