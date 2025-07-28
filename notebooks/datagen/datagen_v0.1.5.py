@@ -33,6 +33,7 @@ To generate the images, the user must specify their content represented in a str
 """###Load and Save Database
 """
 from xaipatimg.datagen.dbimg import load_db
+import json
 def load_db(db_dir):
     """
     Load the database from the given path. If the file does not exist, returns an empty DB.
@@ -139,7 +140,7 @@ gen_img_and_save_db(db, db_dir, overwrite=True, n_jobs=190)
 rules: at least one row contains only circle, and if row 2 contains red symbols if it does rule 1 applies otherwise rule 2 applies
 """
 import csv
-import json
+
 
 """Define Rules and generate dataset"""
 
