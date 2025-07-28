@@ -56,15 +56,15 @@ from xaipatimg.datagen.dbimg import load_db
 #     except FileNotFoundError:
 #         return {}
 # from xaipatimg.datagen.dbimg import save_db
-# def save_db(db_dir, db):
-#     """
-#     Save the given database to the given path
-#     :param db_dir: path to the root directory of the database
-#     :param db: database object
-#     :return: None
-#     """
-#     with open(os.path.join(db_dir, "db.json"), 'w', encoding='utf-8') as f:
-#         json.dump(db, f, ensure_ascii=False, indent=4)
+def save_db(db_dir, db):
+    """
+    Save the given database to the given path
+    :param db_dir: path to the root directory of the database
+    :param db: database object
+    :return: None
+    """
+    with open(os.path.join(db_dir, "db.json"), 'w', encoding='utf-8') as f:
+        json.dump(db, f, ensure_ascii=False, indent=4)
 
 from xaipatimg.datagen.dbimg import load_db
 db = load_db(db_dir)
@@ -329,7 +329,7 @@ def gen_img(img_path, content, division=(6,6), dimension=(700, 700), overwrite=F
     # Save the image
     img.save(img_path)
     
-from xaipatimg.datagen.dbimg import save_db
+# from xaipatimg.datagen.dbimg import save_db
 from joblib import Parallel, delayed
 def gen_img_and_save_db(db, db_dir, overwrite=False, n_jobs=1):
     """
