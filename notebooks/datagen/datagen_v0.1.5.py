@@ -55,7 +55,7 @@ from xaipatimg.datagen.dbimg import load_db
 #             return json_data
 #     except FileNotFoundError:
 #         return {}
-from xaipatimg.datagen.dbimg import save_db
+# from xaipatimg.datagen.dbimg import save_db
 # def save_db(db_dir, db):
 #     """
 #     Save the given database to the given path
@@ -328,7 +328,8 @@ def gen_img(img_path, content, division=(6,6), dimension=(700, 700), overwrite=F
 
     # Save the image
     img.save(img_path)
-
+    
+from xaipatimg.datagen.dbimg import save_db
 from joblib import Parallel, delayed
 def gen_img_and_save_db(db, db_dir, overwrite=False, n_jobs=1):
     """
