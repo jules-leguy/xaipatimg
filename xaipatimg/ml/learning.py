@@ -418,7 +418,7 @@ def load_resnet18_based_model(model_dir, device):
     model = torch.hub.load('pytorch/vision:v0.10.0',
                            'resnet18', pretrained=False)
     model.fc = Linear(in_features=512, out_features=2, bias=True)
-    checkpoint = "model_at_80" if os.path.exists(os.path.join(model_dir, "model_at_80")) \
+    checkpoint = "model_at_90" if os.path.exists(os.path.join(model_dir, "model_at_90")) \
         else "best_model"
 
     model.load_state_dict(torch.load(os.path.join(
