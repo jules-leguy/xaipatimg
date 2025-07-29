@@ -186,7 +186,7 @@ def _check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, c
 
 def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir, device="cuda:0", training_epochs=90, lr=0.1,
                          momentum=0.9, weight_decay=1e-4, batch_size=32, lr_step_size=30, lr_gamma=0.1, train_loss_write_period_logs=100,
-                         target_accuracy=1.0, training_mode="batch", patience=None, interval_batch=200):
+                         target_accuracy=0.9, training_mode="batch", patience=None, interval_batch=200):
     """
     Perform the training of the given model.
     The default hyper-parameters correspond to the ones that were used to train ResNet18 model. The stochastic

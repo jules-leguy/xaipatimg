@@ -20,7 +20,7 @@ Same as v0.1.2 but with 2 millions images and with making sure there isn't any d
 
 from pathlib import Path
 import os
-os.environ["DATA"] = os.path.expanduser("~/data/")
+os.environ["DATA"] = os.path.expanduser("~/")
 db_dir = os.environ["DATA"] + "PatImgXAI_data/db0.1.6_6x6/"
 os.makedirs(db_dir, exist_ok=True)
 
@@ -32,36 +32,9 @@ To generate the images, the user must specify their content represented in a str
 
 """###Load and Save Database
 """
-from xaipatimg.datagen.dbimg import load_db
 import json
-# import uuid
-# import os
+from xaipatimg.datagen.dbimg import load_db
 
-# def generate_uuid():
-#     return str(uuid.uuid1().hex)
-
-# def load_db(db_dir):
-#     """
-#     Load the database from the given path. If the file does not exist, returns an empty DB.
-#     the purpose of load db is to access the db.json
-#     :param db_dir: path to the root directory of the database
-#     :return: database object
-#     """
-#     try:
-#         with open(os.path.join(db_dir, "db.json")) as json_file:
-#             json_data = json.load(json_file)
-#             return json_data
-#     except FileNotFoundError:
-#         return {}
-# def save_db(db_dir, db):
-#     """
-#     Save the given database to the given path
-#     :param db_dir: path to the root directory of the database
-#     :param db: database object
-#     :return: None
-#     """
-#     with open(os.path.join(db_dir, "db.json"), 'w', encoding='utf-8') as f:
-#         json.dump(db, f, ensure_ascii=False, indent=4)
 db = load_db(db_dir)
 print(db)
 
