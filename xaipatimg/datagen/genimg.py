@@ -32,7 +32,7 @@ def draw_triangle(draw, x, y, size, color):
     draw.polygon(points, fill=color, outline=color)
 
 
-def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), overwrite=False):
+def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlight=None, overwrite=False):
     """
     Generate an image that fits the given features.
     :param img_path: path where to save the generated image.
@@ -43,6 +43,8 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), overwrite=
     :param overwrite: whether to overwrite existing images. If False, no action will be taken if the image already exists.
     :return: None
     """
+    
+    to_highlight = set(to_highlight or [])
 
     # Exit if the file already exists and overwrite is set to False
     already_exists = os.path.exists(img_path)
@@ -129,6 +131,17 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), overwrite=
             draw_square(draw, x_center, y_center, shape_size / 2, color)
         elif shape == 'triangle':
             draw_triangle(draw, x_center, y_center, shape_size, color)
+            
+    #integrating code by adding highlighting the symbols
+    highlight_margin = 0.15 * shape_size
+    for (x, y) in to_highlight:
+        x_center = grid_origin_x + (x + 0.5) * cell_width
+        y_center = grid_origin_y + (y + 0.5) * cell_height
+        outer_r = shape_size / 2 + highlight_margin
+        draw.ellipse(
+            (x_center - outer_r, y_center - outer_r, x_center + outer_r, y_center + outer_r),
+            outline=(153, 153, 153), width=3
+        )
 
     # Save the image
     img.save(img_path)
