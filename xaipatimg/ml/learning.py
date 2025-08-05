@@ -19,6 +19,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import transforms
 
 from xaipatimg.ml import resnet18_preprocess_no_norm
+from xaipatimg.ml.xai import _create_dirs, _get_subfolder
 
 
 class PatImgDataset(torch.utils.data.Dataset):
@@ -109,37 +110,37 @@ def compute_mean_std_dataset(db_dir, dataset_filename, preprocess_no_norm):
     return means, stds
 
 
-def _train_epoch(training_loader, model, optimizer, loss_fn, device, epoch_index, tb_writer, train_loss_write_period):
-    running_loss = 0.
-    last_loss = 0.
+# def _train_epoch(training_loader, model, optimizer, loss_fn, device, epoch_index, tb_writer, train_loss_write_period):
+#     running_loss = 0.
+#     last_loss = 0.
 
-    for i, data in enumerate(training_loader):
-        # Every data instance is an input + label pair
-        inputs, labels = data[0].to(device), data[1].to(device)
-        print("newbatch " + str(i))
-        # Zero your gradients for every batch!
-        optimizer.zero_grad()
+#     for i, data in enumerate(training_loader):
+#         # Every data instance is an input + label pair
+#         inputs, labels = data[0].to(device), data[1].to(device)
+#         print("newbatch " + str(i))
+#         # Zero your gradients for every batch!
+#         optimizer.zero_grad()
 
-        # Make predictions for this batch
-        outputs = model(inputs.float())
+#         # Make predictions for this batch
+#         outputs = model(inputs.float())
 
-        # Compute the loss and its gradients
-        loss = loss_fn(outputs, labels)
-        loss.backward()
+#         # Compute the loss and its gradients
+#         loss = loss_fn(outputs, labels)
+#         loss.backward()
 
-        # Adjust learning weights
-        optimizer.step()
+#         # Adjust learning weights
+#         optimizer.step()
 
-        # Gather data and report
-        running_loss += loss.item()
-        if (i + 1) % train_loss_write_period == 0:
-            last_loss = running_loss / train_loss_write_period
-            print('  batch {} loss: {}'.format(i + 1, last_loss))
-            tb_x = epoch_index * len(training_loader) + i + 1
-            tb_writer.add_scalar('Loss/train', last_loss, tb_x)
-            running_loss = 0.
+#         # Gather data and report
+#         running_loss += loss.item()
+#         if (i + 1) % train_loss_write_period == 0:
+#             last_loss = running_loss / train_loss_write_period
+#             print('  batch {} loss: {}'.format(i + 1, last_loss))
+#             tb_x = epoch_index * len(training_loader) + i + 1
+#             tb_writer.add_scalar('Loss/train', last_loss, tb_x)
+#             running_loss = 0.
 
-    return last_loss
+#     return last_loss
 
 
 def _check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, counter, patience, model, model_dir, mode, step):
@@ -153,15 +154,16 @@ def _check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, c
     :param patience: the number of times in a row that the validation loss does not improve before training is stopped early.
     :param model: save the model when the condition is met
     :param model_dir: directory to save model checkpoint
-    :param mode: 'epoch' or 'batch'
+    :param mode: 'epoch' validate at the end of each epoch or 'batch' validate at every interval batches
     :param step: epoch number or global step
     :return: tuple (stop_training, new_counter, new_best_loss)
     """
     label = "Epoch" if mode == "epoch" else "Step"
+    checkpoint_path = join(model_dir, "final_model")
 
     # Stop if accuracy threshold is reached
     if vaccuracy >= target_accuracy:
-        cap_path = join(model_dir, f"model_at_{int(target_accuracy * 100)}")
+        cap_path = join(model_dir, checkpoint_path)
         torch.save(model.state_dict(), cap_path)
         print(f"Accuracy cap hit at {label} {step}")
         return True, counter, best_loss
@@ -171,8 +173,8 @@ def _check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, c
         if current_loss < best_loss:
             best_loss = current_loss
             counter = 0
-            torch.save(model.state_dict(), join(model_dir, "best_model"))
-            with open(join(model_dir, "best_model_epoch"), "w") as f:
+            torch.save(model.state_dict(), join(model_dir, checkpoint_path))
+            with open(join(model_dir, "final_model_epoch"), "w") as f:
                 f.write(str(step))
             return False, counter, best_loss
         else:
@@ -186,7 +188,7 @@ def _check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, c
 
 def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir, device="cuda:0", training_epochs=90, lr=0.1,
                          momentum=0.9, weight_decay=1e-4, batch_size=32, lr_step_size=30, lr_gamma=0.1, train_loss_write_period_logs=100,
-                         target_accuracy=0.9, training_mode="batch", patience=None, interval_batch=200):
+                         target_accuracy=1.0, training_mode="batch", patience=None, interval_batch=200):
     """
     Perform the training of the given model.
     The default hyper-parameters correspond to the ones that were used to train ResNet18 model. The stochastic
@@ -207,7 +209,9 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     :param lr_gamma: learning rate gamma (Step LR scheduler)
     :param train_loss_write_period_logs: period between two recordings of the training loss in the logs
     :param target_accuracy: stop the model from training once the desired accuracy on the validation dataset is reached
-    :param training_mode: decides whether the model runs training and validation checks per 'batch' or per 'epoch'. 
+    :param training_mode: decides whether the model runs training and validation checks per 'batch' or per 'epoch'.
+                         'epoch' for validation at the end of each epoch,
+                         'batch' for validation at every interval batches.
     :param patience: the number of times in a row that the validation loss does not improve before training is stopped early.
     :param interval_batch: number of batches between each validation
     :return:
@@ -241,22 +245,17 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
         transforms.Normalize(mean=means, std=stds)
     ])
 
-    dataset_train = PatImgDataset(
-        db_dir, train_dataset_filename, transform=preprocess)
-    dataset_valid = PatImgDataset(
-        db_dir, valid_dataset_filename, transform=preprocess)
-    training_loader = torch.utils.data.DataLoader(
-        dataset_train, batch_size=batch_size, shuffle=True)
-    valid_loader = torch.utils.data.DataLoader(
-        dataset_valid, batch_size=batch_size, shuffle=False)
+    dataset_train = PatImgDataset(db_dir, train_dataset_filename, transform=preprocess)
+    dataset_valid = PatImgDataset(db_dir, valid_dataset_filename, transform=preprocess)
+    training_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
+    valid_loader = torch.utils.data.DataLoader(dataset_valid, batch_size=batch_size, shuffle=False)
 
     model = torch.hub.load('pytorch/vision:v0.10.0',
                            'resnet18', pretrained=False)
     model.fc = Linear(512, 2)
     model = model.to(device)
 
-    optimizer = torch.optim.SGD(
-        model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
+    optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
     loss_fn = torch.nn.CrossEntropyLoss()
     scheduler = StepLR(optimizer, step_size=lr_step_size, gamma=lr_gamma)
 
@@ -302,8 +301,10 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
 
         wandb_log = {"training_loss": current_avg_tloss,
                      "validation_loss": avg_vloss, "vaccuracy": vaccuracy}
+       
         if training_mode == "epoch":
             wandb_log["epoch"] = step
+      
         else:
             wandb_log["global_step"] = step
         wandb.log(wandb_log)
@@ -317,53 +318,60 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
             stop_training = True
 
     # --- Training Loop ---
+    running_tloss = 0.0
+    train_batches = 0
+
     for epoch in range(training_epochs):
         if stop_training:
             break
-        print(f'EPOCH {epoch + 1}:')
+
+        print(f"EPOCH {epoch + 1}:")
         model.train()
 
-        # 1) EPOCH-MODE
-        if training_mode == "epoch":
-            avg_loss = _train_epoch(
-                training_loader, model, optimizer, loss_fn,
-                device, epoch, writer, train_loss_write_period_logs)
-            _validate_and_log(avg_loss, epoch + 1)
+        for batch_idx, data in enumerate(training_loader, 1):
+            if stop_training:
+                break
 
-        # 2) BATCH-MODE
-        else:
+            inputs, labels = data[0].to(device), data[1].to(device)
+            optimizer.zero_grad()
+            loss = loss_fn(model(inputs.float()), labels)
+            loss.backward()
+            optimizer.step()
+
+            running_tloss += loss.item()
+            train_batches += 1
+            global_step += 1
+
+            if global_step % train_loss_write_period_logs == 0:
+                avg_loss = running_tloss / train_batches
+                writer.add_scalar('Loss/train', avg_loss, global_step)
+
+            # training_mode == batch
+            if training_mode == "batch" and global_step % interval_batch == 0:
+                avg_tloss = running_tloss / train_batches
+                _validate_and_log(avg_tloss, global_step)
+                running_tloss = 0.0
+                train_batches = 0
+
+        #   #training_mode == epoch mode 
+        if training_mode == "epoch" and train_batches > 0 and not stop_training:
+            avg_loss = running_tloss / train_batches
+            _validate_and_log(avg_loss, epoch + 1)
             running_tloss = 0.0
             train_batches = 0
-            for batch_idx, data in enumerate(training_loader):
-                if stop_training:
-                    break
 
-                inputs, labels = data[0].to(device), data[1].to(device)
-                optimizer.zero_grad()
-                outputs = model(inputs.float())
-                loss = loss_fn(outputs, labels)
-                loss.backward()
-                optimizer.step()
-
-                running_tloss += loss.item()
-                train_batches += 1
-                global_step += 1
-
-                if (batch_idx + 1) % train_loss_write_period_logs == 0:
-                    avg_loss = running_tloss / train_batches
-                    print('  batch {} loss: {}'.format(
-                        batch_idx + 1, avg_loss))
-
-                if global_step % interval_batch == 0:
-                    avg_tloss = running_tloss / train_batches
-                    _validate_and_log(avg_tloss, global_step)
-                    running_tloss = 0.0
-                    train_batches = 0
+        # ── catch‑up validation if batch‑mode hasn’t fired this epoch ─
+        if training_mode == "batch" and train_batches > 0 and not stop_training:
+            avg_tloss = running_tloss / train_batches
+            _validate_and_log(avg_tloss, global_step)
+            running_tloss = 0.0
+            train_batches = 0
 
         scheduler.step()
 
     writer.close()
     wandb.finish()
+
     final_model_path = os.path.join(model_dir, "final_model")
     torch.save(model.state_dict(), final_model_path)
     print("Training complete")
@@ -411,18 +419,14 @@ def load_resnet18_based_model(model_dir, device):
     """
     Creating a resnet18 model with two output features and loading the weights from the model stored in the given
     directory.
-    :param model_dir: path to model directory (contains a file called best_model).
+    :param model_dir: path to model directory (contains a file called final_model).
     :param device: device on which to run the model.
     :return: the model.
     """
-    model = torch.hub.load('pytorch/vision:v0.10.0',
-                           'resnet18', pretrained=False)
+    model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=False)
     model.fc = Linear(in_features=512, out_features=2, bias=True)
-    checkpoint = "model_at_90" if os.path.exists(os.path.join(model_dir, "model_at_90")) \
-        else "final_model"
 
-    model.load_state_dict(torch.load(os.path.join(
-        model_dir, checkpoint), weights_only=True))
+    model.load_state_dict(torch.load(os.path.join(model_dir, "final_model"), weights_only=True))
     model.eval()
     return model.to(device)
 
@@ -468,18 +472,12 @@ def compute_resnet18_model_scores(db_dir, train_dataset_filename, test_dataset_f
     """
 
     # Importing the data
-    dataset_train = get_dataset_transformed(
-        db_dir, model_dir, train_dataset_filename)
-    dataset_test = get_dataset_transformed(
-        db_dir, model_dir, test_dataset_filename)
-    dataset_valid = get_dataset_transformed(
-        db_dir, model_dir, valid_dataset_filename)
-    train_loader = torch.utils.data.DataLoader(
-        dataset_train, batch_size=100, shuffle=False)
-    test_loader = torch.utils.data.DataLoader(
-        dataset_test, batch_size=100, shuffle=False)
-    valid_loader = torch.utils.data.DataLoader(
-        dataset_valid, batch_size=100, shuffle=False)
+    dataset_train = get_dataset_transformed(db_dir, model_dir, train_dataset_filename)
+    dataset_test = get_dataset_transformed(db_dir, model_dir, test_dataset_filename)
+    dataset_valid = get_dataset_transformed(db_dir, model_dir, valid_dataset_filename)
+    train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=100, shuffle=False)
+    test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=100, shuffle=False)
+    valid_loader = torch.utils.data.DataLoader(dataset_valid, batch_size=100, shuffle=False)
 
     # Loading the model
     model = load_resnet18_based_model(model_dir, device)
@@ -507,14 +505,13 @@ def save_classification(db_dir, test_dataset_filename, model_dir, classification
     :param model_dir: path to the directory of the model.
     :param classification_dir: path to the root directory of the classified image
     :param max_items: maximum number of items to copy.
+    :param device: device on which to run the model.
     """
 
-    # "bluediagonal_test" → "bluediagonal"
     split_name = Path(test_dataset_filename).stem.rsplit("_", 1)[0]
     classification_dir = os.path.join(classification_dir, split_name)
 
     # makes TP / TN / FP / FN sub-folders
-    from xaipatimg.ml.xai import _create_dirs, _get_subfolder
     _create_dirs(classification_dir)
 
     # Load model and dataset

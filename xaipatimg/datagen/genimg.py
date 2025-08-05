@@ -34,12 +34,13 @@ def draw_triangle(draw, x, y, size, color):
 
 def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlight=None, overwrite=False):
     """
-    Generate an image that fits the given features.
+    Generate a grid label image, as well as highlighting a feature in the image. 
     :param img_path: path where to save the generated image.
     :param content: data structure that describes the content of the image (coordinates and description of geometrical
     shapes in the picture.
     :param division: tuple that describes the number of horizontal and vertical divisions.
     :param dimension: tuple that describes the size of the image in pixels.
+    :param to_higlight: List of (x, y) positions to highlight in the image.
     :param overwrite: whether to overwrite existing images. If False, no action will be taken if the image already exists.
     :return: None
     """
@@ -216,8 +217,6 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
 
 #     # Save the image
 #     img.save(img_path)
-
-
 def gen_img_and_save_db(db, db_dir, overwrite=False, n_jobs=1):
     """
     Generate every image from the DB.

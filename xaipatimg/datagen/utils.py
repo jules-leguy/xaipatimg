@@ -109,3 +109,46 @@ class PatImgObj:
             "content": img_content,
             "path": self.path,
         }
+        
+        
+    def get_symbols_by(self, shape=None, color=None):
+        """
+        Returns all symbols in the image that match a given shape and/or color.
+        :param shape: shape of the symbol
+        :param color: color of the symbol
+        """
+        found_symbols = []
+        num_columns = self.division[0]
+        num_rows = self.division[1]
+
+        for x in range(num_columns):
+            for y in range(num_rows):
+                current_symbol = self.img_content_arr[x, y]
+                if current_symbol is None:
+                    continue
+
+                shape_match = (shape is None or current_symbol['shape'] == shape)
+                color_match = (color is None or current_symbol['color'] == color)
+
+                if shape_match and color_match:
+                    found_symbols.append(current_symbol)
+
+        return found_symbols
+    
+    def get_empty_cells(self, row=None):
+        """
+        Returns a list of (x, y) positions in the grid where there is no symbol.
+        If row is given, only returns empty cells in that row.
+        """
+        empty_cells = []
+        num_columns = self.division[0]
+        num_rows = self.division[1]
+
+        for x in range(num_columns):
+            for y in range(num_rows):
+                if self.img_content_arr[x, y] is None:
+                    if row is None or y == row:
+                        empty_cells.append((x, y))
+        return empty_cells
+
+        

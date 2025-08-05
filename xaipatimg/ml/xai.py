@@ -99,7 +99,7 @@ def generate_cam_resnet18(cam_technique, db_dir, dataset_filename, model_dir, de
         raise RuntimeError("Unknown cam technique")
 
     # Creating directories
-    xai_output_path = os.path.join(model_dir, "xai_80%_" + pathlib.Path(dataset_filename).stem + "_" + cam_technique)
+    xai_output_path = os.path.join(model_dir, "final_model" + pathlib.Path(dataset_filename).stem + "_" + cam_technique)
     _create_dirs(xai_output_path)
 
     # Loading data
@@ -213,7 +213,7 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, device="cuda:0",
     """
 
     # Creating directories
-    xai_output_path = os.path.join(model_dir, "xai_80%_" + pathlib.Path(dataset_filename).stem + "_" + "shap_" + str(masker))
+    xai_output_path = os.path.join(model_dir, "final_model" + pathlib.Path(dataset_filename).stem + "_" + "shap_" + str(masker))
     _create_dirs(xai_output_path)
 
     # Loading data
