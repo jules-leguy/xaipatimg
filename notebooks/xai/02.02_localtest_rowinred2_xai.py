@@ -2,15 +2,18 @@ from xaipatimg.ml.xai import generate_counterfactuals_resnet18
 from xaipatimg.datagen.utils import PatImgObj, gen_rand_sym
 import random
 from xaipatimg.datagen.dbimg import load_db
+import numpy as np
+from xaipatimg.ml.xai import generate_shap_resnet18
 import os
 
 os.environ["DATA"] = os.path.expanduser("~/")
 db_dir = os.environ["DATA"] + "PatImgXAI_data/db0.1.5_6x6/"
-test_dataset_filename = "red_in_row2_test.csv"
-model_dir = os.environ["DATA"] + "models/db0.1.5_6x6/red_in_row2/"
+test_dataset_filename = "red_in_row_2_test.csv"
+model_dir = os.environ["DATA"] + "models/db0.1.5_6x6/red_in_row_2/"
 
 db = load_db(db_dir)
 
+generate_shap_resnet18(db_dir, test_dataset_filename, model_dir, "cuda:0", n_jobs=1, dataset_size=100, masker="ndarray")
 
 def extract_red_in_row2(img_content):
     """

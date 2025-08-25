@@ -261,7 +261,8 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, device="cuda:0",
     #     )
 
     shap_values = explainer(
-        Xtr, max_evals=100, batch_size=50
+        # Xtr, max_evals=100, batch_size=50
+        Xtr, max_evals=1000, batch_size=50
     )
     min_shap_value = np.min(shap_values.values)
     max_shap_value = np.max(shap_values.values)

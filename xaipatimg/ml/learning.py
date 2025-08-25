@@ -19,7 +19,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import transforms
 
 from xaipatimg.ml import resnet18_preprocess_no_norm
-from xaipatimg.ml.xai import _create_dirs, _get_subfolder
+# from xaipatimg.ml.xai import _create_dirs, _get_subfolder
 
 
 class PatImgDataset(torch.utils.data.Dataset):
@@ -108,40 +108,6 @@ def compute_mean_std_dataset(db_dir, dataset_filename, preprocess_no_norm):
     stds = [np.std(x).astype(float) for x in
             [alldata_no_norm[:, channel, :] for channel in range(alldata_no_norm.shape[1])]]
     return means, stds
-
-
-# def _train_epoch(training_loader, model, optimizer, loss_fn, device, epoch_index, tb_writer, train_loss_write_period):
-#     running_loss = 0.
-#     last_loss = 0.
-
-#     for i, data in enumerate(training_loader):
-#         # Every data instance is an input + label pair
-#         inputs, labels = data[0].to(device), data[1].to(device)
-#         print("newbatch " + str(i))
-#         # Zero your gradients for every batch!
-#         optimizer.zero_grad()
-
-#         # Make predictions for this batch
-#         outputs = model(inputs.float())
-
-#         # Compute the loss and its gradients
-#         loss = loss_fn(outputs, labels)
-#         loss.backward()
-
-#         # Adjust learning weights
-#         optimizer.step()
-
-#         # Gather data and report
-#         running_loss += loss.item()
-#         if (i + 1) % train_loss_write_period == 0:
-#             last_loss = running_loss / train_loss_write_period
-#             print('  batch {} loss: {}'.format(i + 1, last_loss))
-#             tb_x = epoch_index * len(training_loader) + i + 1
-#             tb_writer.add_scalar('Loss/train', last_loss, tb_x)
-#             running_loss = 0.
-
-#     return last_loss
-
 
 def _check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, counter, patience, model, model_dir, mode, step):
     """
@@ -498,6 +464,7 @@ def compute_resnet18_model_scores(db_dir, train_dataset_filename, test_dataset_f
 
 
 def save_classification(db_dir, test_dataset_filename, model_dir, classification_dir, device="cuda:0", max_items=None):
+    from xaipatimg.ml.xai import _create_dirs, _get_subfolder
     """
     Copy every image listed in test dataset into TP / TN / FP / FN folders to observer what the model got right or wrong.
     :param db_dir: path to the root directory of the database.
