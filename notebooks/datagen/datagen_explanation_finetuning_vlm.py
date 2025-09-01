@@ -13,8 +13,6 @@ from pathlib import Path
 import os
 os.environ["DATA"] = os.path.expanduser("~/")
 db_dir = os.environ["DATA"] + "PatImgXAI_data/db0.1.5_6x6/"
-# os.environ["DATA"] = "/content/drive/MyDrive/IMT/Internship"
-# db_dir = os.environ["DATA"] + "PatImgXAI_data/db.vlm/"
 db = os.path.join(db_dir, "datasets")
 db_json = os.path.join(db_dir, "db.json")
 
