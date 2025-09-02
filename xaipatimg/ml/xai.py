@@ -162,7 +162,7 @@ def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_p
     # Plotting the output that contains the explanations, and removing the legend
     shap.image_plot(shap_values=shap_values, pixel_values=img_numpy, show=False, width=18,
                     colormap_lim=max(abs(shap_values_lim[0]), abs(shap_values_lim[1])))
-    # shap.image_plot(shap_values=shap_values, pixel_values=img_numpy, show=False, width=18)
+    
     plt.gcf().axes[-1].remove()
 
     # Loading the plot as a PIL Image
@@ -261,7 +261,6 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, device="cuda:0",
     #     )
 
     shap_values = explainer(
-        # Xtr, max_evals=100, batch_size=50
         Xtr, max_evals=1000, batch_size=50
     )
     min_shap_value = np.min(shap_values.values)

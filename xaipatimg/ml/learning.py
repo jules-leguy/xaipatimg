@@ -125,31 +125,32 @@ def _check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, c
     :return: tuple (stop_training, new_counter, new_best_loss)
     """
     label = "Epoch" if mode == "epoch" else "Step"
-    checkpoint_path = join(model_dir, "final_model")
+    model_path = join(model_dir, "final_model")
+    
+    #disable early_stop is patience = none
+    if patience is None:
+        return False, counter, best_loss
 
     # Stop if accuracy threshold is reached
     if vaccuracy >= target_accuracy:
-        cap_path = join(model_dir, checkpoint_path)
+        cap_path = join(model_dir, model_path)
         torch.save(model.state_dict(), cap_path)
         print(f"Accuracy cap hit at {label} {step}")
         return True, counter, best_loss
-
-    if patience is not None:
-        # Check for loss improvement
-        if current_loss < best_loss:
-            best_loss = current_loss
-            counter = 0
-            torch.save(model.state_dict(), join(model_dir, checkpoint_path))
-            with open(join(model_dir, "final_model_epoch"), "w") as f:
-                f.write(str(step))
-            return False, counter, best_loss
-        else:
-            counter += 1
-            if counter >= patience:
-                print(f"Early stopping triggered at {label} {step}")
-                return True, counter, best_loss
-            return False, counter, best_loss
-    return False, counter, best_loss
+    
+    if current_loss < best_loss:
+        best_loss = current_loss
+        counter = 0
+        torch.save(model.state_dict(), join(model_dir, model_path))
+        with open(join(model_dir, "final_model_epoch"), "w") as f:
+            f.write(str(step))
+        return False, counter, best_loss
+    else:
+        counter += 1
+        if counter >= patience:
+            print(f"Early stopping triggered at {label} {step}")
+            return True, counter, best_loss
+        return False, counter, best_loss
 
 
 def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir, device="cuda:0", training_epochs=90, lr=0.1,
@@ -231,7 +232,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     # --- Training State ---
     best_vloss = np.inf
     counter = 0
-    global_step = 0
+    global_batch_nb = 0
     stop_training = False
     vaccuracies = []
 
@@ -272,7 +273,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
             wandb_log["epoch"] = step
       
         else:
-            wandb_log["global_step"] = step
+            wandb_log["global_batch_nb"] = step
         wandb.log(wandb_log)
 
         early_stop, new_counter, new_best_vloss = _check_early_stopping(
@@ -285,7 +286,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
 
     # --- Training Loop ---
     running_tloss = 0.0
-    train_batches = 0
+    curr_epoch_batch_nb = 0
 
     for epoch in range(training_epochs):
         if stop_training:
@@ -305,33 +306,33 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
             optimizer.step()
 
             running_tloss += loss.item()
-            train_batches += 1
-            global_step += 1
+            curr_epoch_batch_nb += 1
+            global_batch_nb += 1
 
-            if global_step % train_loss_write_period_logs == 0:
-                avg_loss = running_tloss / train_batches
-                writer.add_scalar('Loss/train', avg_loss, global_step)
+            if global_batch_nb % train_loss_write_period_logs == 0:
+                avg_loss = running_tloss / curr_epoch_batch_nb
+                writer.add_scalar('Loss/train', avg_loss, global_batch_nb)
 
             # training_mode == batch
-            if training_mode == "batch" and global_step % interval_batch == 0:
-                avg_tloss = running_tloss / train_batches
-                _validate_and_log(avg_tloss, global_step)
+            if training_mode == "batch" and global_batch_nb % interval_batch == 0:
+                avg_tloss = running_tloss / curr_epoch_batch_nb
+                _validate_and_log(avg_tloss, global_batch_nb)
                 running_tloss = 0.0
-                train_batches = 0
+                curr_epoch_batch_nb = 0
 
         #   #training_mode == epoch mode 
-        if training_mode == "epoch" and train_batches > 0 and not stop_training:
-            avg_loss = running_tloss / train_batches
+        if training_mode == "epoch" and curr_epoch_batch_nb > 0 and not stop_training:
+            avg_loss = running_tloss / curr_epoch_batch_nb
             _validate_and_log(avg_loss, epoch + 1)
             running_tloss = 0.0
-            train_batches = 0
+            curr_epoch_batch_nb = 0
 
         # ── catch‑up validation if batch‑mode hasn’t fired this epoch ─
-        if training_mode == "batch" and train_batches > 0 and not stop_training:
-            avg_tloss = running_tloss / train_batches
-            _validate_and_log(avg_tloss, global_step)
+        if training_mode == "batch" and curr_epoch_batch_nb > 0 and not stop_training:
+            avg_tloss = running_tloss / curr_epoch_batch_nb
+            _validate_and_log(avg_tloss, global_batch_nb)
             running_tloss = 0.0
-            train_batches = 0
+            curr_epoch_batch_nb = 0
 
         scheduler.step()
 

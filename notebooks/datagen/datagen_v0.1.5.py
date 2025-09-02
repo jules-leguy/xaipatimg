@@ -21,7 +21,7 @@ Same as v0.1.2 but with 2 millions images and with making sure there isn't any d
 from pathlib import Path
 import os
 os.environ["DATA"] = os.path.expanduser("~/")
-db_dir = os.environ["DATA"] + "PatImgXAI_data/db0.1.6_6x6/"
+db_dir = os.environ["DATA"] + "PatImgXAI_data/db0.1.5_6x6/"
 os.makedirs(db_dir, exist_ok=True)
 
 """**Content of the database**\

@@ -14,6 +14,7 @@ def gen_rand_sym(shapes, colors):
     """
     return {"shape": np.random.choice(shapes), "color": np.random.choice(colors)}
 
+
 def get_coords_diff(patimgobj1, patimgobj2):
     """
     Returning the list of coordinates where the two given PatImgObj instances are not identical. Assuming both instances
@@ -29,6 +30,7 @@ def get_coords_diff(patimgobj1, patimgobj2):
             if patimgobj1.img_content_arr[x][y] != patimgobj2.img_content_arr[x][y]:
                 coords_list.append((x, y))
     return coords_list
+
 
 class PatImgObj:
     """ Representing XAI pattern images as a Python object to facilitate the edition of the content """
@@ -109,13 +111,16 @@ class PatImgObj:
             "content": img_content,
             "path": self.path,
         }
-        
-        
+
     def get_symbols_by(self, shape=None, color=None):
         """
         Returns all symbols in the image that match a given shape and/or color.
+        If shape is None, no shape constraint is applied.
+        If color is None, no color constraint is applied.
+        If both are None, all symbols are returned.
         :param shape: shape of the symbol
         :param color: color of the symbol
+        :return list of symbols matching the given constraints
         """
         found_symbols = []
         num_columns = self.division[0]
@@ -127,18 +132,22 @@ class PatImgObj:
                 if current_symbol is None:
                     continue
 
-                shape_match = (shape is None or current_symbol['shape'] == shape)
-                color_match = (color is None or current_symbol['color'] == color)
+                shape_match = (
+                    shape is None or current_symbol['shape'] == shape)
+                color_match = (
+                    color is None or current_symbol['color'] == color)
 
                 if shape_match and color_match:
                     found_symbols.append(current_symbol)
 
         return found_symbols
-    
+
     def get_empty_cells(self, row=None):
         """
         Returns a list of (x, y) positions in the grid where there is no symbol.
         If row is given, only returns empty cells in that row.
+        :param row: the row number to look at. If not given, all rows are checked.
+        :return: 
         """
         empty_cells = []
         num_columns = self.division[0]
@@ -150,5 +159,3 @@ class PatImgObj:
                     if row is None or y == row:
                         empty_cells.append((x, y))
         return empty_cells
-
-        

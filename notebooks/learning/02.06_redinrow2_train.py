@@ -13,7 +13,7 @@ device = "cuda:0"
 
 from xaipatimg.ml.learning import train_resnet18_model
 
-train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir, device=device)
+train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir, target_accuracy=0.9, device=device)
 
 from xaipatimg.ml.learning import compute_resnet18_model_scores
 
