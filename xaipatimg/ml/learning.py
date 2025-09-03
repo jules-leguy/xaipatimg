@@ -9,7 +9,6 @@ import os
 import torch
 import tqdm
 import shutil
-import wandb
 from PIL import Image
 from pathlib import Path
 from sklearn.metrics import accuracy_score, precision_score, roc_auc_score, recall_score, confusion_matrix
@@ -185,21 +184,6 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     """
     os.makedirs(model_dir, exist_ok=True)
 
-    # --- Setup ---
-    rule_name = Path(train_dataset_filename).stem.split('_')[0]
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    wandb.init(project="xaipatimg", name=f"{rule_name}-{timestamp}", config={
-        "learning_rate": lr,
-        "epochs": training_epochs,
-        "batch_size": batch_size,
-        "lr_step_size": lr_step_size,
-        "lr_gamma": lr_gamma,
-        "target_accuracy": target_accuracy,
-        "training_mode": training_mode,
-        "patience": patience,
-        "interval_batch": interval_batch
-    })
-
     means, stds = compute_mean_std_dataset(
         db_dir, train_dataset_filename, resnet18_preprocess_no_norm)
     print(f"Train dataset statistics : " + str(means) + " " + str(stds))
@@ -266,16 +250,6 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
                            {'Validation': vaccuracy}, step)
         writer.flush()
 
-        wandb_log = {"training_loss": current_avg_tloss,
-                     "validation_loss": avg_vloss, "vaccuracy": vaccuracy}
-       
-        if training_mode == "epoch":
-            wandb_log["epoch"] = step
-      
-        else:
-            wandb_log["global_batch_nb"] = step
-        wandb.log(wandb_log)
-
         early_stop, new_counter, new_best_vloss = _check_early_stopping(
             vaccuracy, target_accuracy, avg_vloss, best_vloss, counter, patience, model, model_dir, training_mode, step)
 
@@ -337,7 +311,6 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
         scheduler.step()
 
     writer.close()
-    wandb.finish()
 
     final_model_path = os.path.join(model_dir, "final_model")
     torch.save(model.state_dict(), final_model_path)
