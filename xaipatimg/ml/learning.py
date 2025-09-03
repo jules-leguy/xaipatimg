@@ -8,7 +8,10 @@ import pandas as pd
 import os
 import torch
 import tqdm
+import shutil
+import wandb
 from PIL import Image
+from pathlib import Path
 from sklearn.metrics import accuracy_score, precision_score, roc_auc_score, recall_score, confusion_matrix
 from torch.nn import Linear
 from torch.optim.lr_scheduler import StepLR
@@ -16,6 +19,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import transforms
 
 from xaipatimg.ml import resnet18_preprocess_no_norm
+# from xaipatimg.ml.xai import _create_dirs, _get_subfolder
 
 
 class PatImgDataset(torch.utils.data.Dataset):
@@ -29,7 +33,8 @@ class PatImgDataset(torch.utils.data.Dataset):
         :param max_size: if not None, the maximum number of images to load
         """
         self.db_dir = db_dir
-        dataset_csv = pd.read_csv(os.path.join(db_dir, "datasets", csv_dataset_filename))
+        dataset_csv = pd.read_csv(os.path.join(
+            db_dir, "datasets", csv_dataset_filename))
         self.img_list = dataset_csv["path"]
         self.img_labels = dataset_csv["class"]
         self.transform = transform
@@ -94,51 +99,63 @@ def compute_mean_std_dataset(db_dir, dataset_filename, preprocess_no_norm):
     :param preprocess_no_norm: preprocessing pipeline without normalization
     :return: tuple ([mean on every channel], [std on every channel])
     """
-    dataset_no_norm = PatImgDataset(db_dir, dataset_filename, transform=preprocess_no_norm)
-    alldata_no_norm = np.array([dataset_no_norm[i][0] for i in range(len(dataset_no_norm))])
+    dataset_no_norm = PatImgDataset(
+        db_dir, dataset_filename, transform=preprocess_no_norm)
+    alldata_no_norm = np.array([dataset_no_norm[i][0]
+                               for i in range(len(dataset_no_norm))])
     means = [np.mean(x).astype(float) for x in
              [alldata_no_norm[:, channel, :] for channel in range(alldata_no_norm.shape[1])]]
     stds = [np.std(x).astype(float) for x in
             [alldata_no_norm[:, channel, :] for channel in range(alldata_no_norm.shape[1])]]
     return means, stds
 
+def _check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, counter, patience, model, model_dir, mode, step):
+    """
+    Early stopping check on accuracy threshold and loss.
+    :param vaccuracy: the current accuracy on validation data
+    :param target_accuracy: the desired accuracy the model should reach
+    :param current_loss: current validation loss
+    :param best_loss: best lowest validation loss seen so far
+    :param counter: count how many consecutive evaluations have not improved best_loss.
+    :param patience: the number of times in a row that the validation loss does not improve before training is stopped early.
+    :param model: save the model when the condition is met
+    :param model_dir: directory to save model checkpoint
+    :param mode: 'epoch' validate at the end of each epoch or 'batch' validate at every interval batches
+    :param step: epoch number or global step
+    :return: tuple (stop_training, new_counter, new_best_loss)
+    """
+    label = "Epoch" if mode == "epoch" else "Step"
+    model_path = join(model_dir, "final_model")
+    
+    #disable early_stop is patience = none
+    if patience is None:
+        return False, counter, best_loss
 
-def _train_epoch(training_loader, model, optimizer, loss_fn, device, epoch_index, tb_writer, train_loss_write_period):
-    running_loss = 0.
-    last_loss = 0.
-
-    for i, data in enumerate(training_loader):
-        # Every data instance is an input + label pair
-        inputs, labels = data[0].to(device), data[1].to(device)
-        print("newbatch " + str(i))
-        # Zero your gradients for every batch!
-        optimizer.zero_grad()
-
-        # Make predictions for this batch
-        outputs = model(inputs.float())
-
-        # Compute the loss and its gradients
-        loss = loss_fn(outputs, labels)
-        loss.backward()
-
-        # Adjust learning weights
-        optimizer.step()
-
-        # Gather data and report
-        running_loss += loss.item()
-        if (i + 1) % train_loss_write_period == 0:
-            last_loss = running_loss / train_loss_write_period
-            print('  batch {} loss: {}'.format(i + 1, last_loss))
-            tb_x = epoch_index * len(training_loader) + i + 1
-            tb_writer.add_scalar('Loss/train', last_loss, tb_x)
-            running_loss = 0.
-
-    return last_loss
+    # Stop if accuracy threshold is reached
+    if vaccuracy >= target_accuracy:
+        cap_path = join(model_dir, model_path)
+        torch.save(model.state_dict(), cap_path)
+        print(f"Accuracy cap hit at {label} {step}")
+        return True, counter, best_loss
+    
+    if current_loss < best_loss:
+        best_loss = current_loss
+        counter = 0
+        torch.save(model.state_dict(), join(model_dir, model_path))
+        with open(join(model_dir, "final_model_epoch"), "w") as f:
+            f.write(str(step))
+        return False, counter, best_loss
+    else:
+        counter += 1
+        if counter >= patience:
+            print(f"Early stopping triggered at {label} {step}")
+            return True, counter, best_loss
+        return False, counter, best_loss
 
 
-def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir, device="cuda:0",
-                         training_epochs=90, lr=0.1, momentum=0.9, weight_decay=1e-4, batch_size=32, lr_step_size=30,
-                         lr_gamma=0.1, train_loss_write_period_logs=100):
+def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir, device="cuda:0", training_epochs=90, lr=0.1,
+                         momentum=0.9, weight_decay=1e-4, batch_size=32, lr_step_size=30, lr_gamma=0.1, train_loss_write_period_logs=100,
+                         target_accuracy=1.0, training_mode="batch", patience=None, interval_batch=200):
     """
     Perform the training of the given model.
     The default hyper-parameters correspond to the ones that were used to train ResNet18 model. The stochastic
@@ -158,109 +175,174 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     :param lr_step_size: learning rate step size (Step LR scheduler)
     :param lr_gamma: learning rate gamma (Step LR scheduler)
     :param train_loss_write_period_logs: period between two recordings of the training loss in the logs
+    :param target_accuracy: stop the model from training once the desired accuracy on the validation dataset is reached
+    :param training_mode: decides whether the model runs training and validation checks per 'batch' or per 'epoch'.
+                         'epoch' for validation at the end of each epoch,
+                         'batch' for validation at every interval batches.
+    :param patience: the number of times in a row that the validation loss does not improve before training is stopped early.
+    :param interval_batch: number of batches between each validation
     :return:
     """
     os.makedirs(model_dir, exist_ok=True)
 
-    # Computing training dataset means and stds
-    means, stds = compute_mean_std_dataset(db_dir, train_dataset_filename, resnet18_preprocess_no_norm)
-    print("Train dataset statistics : " + str(means) + " " + str(stds))
+    # --- Setup ---
+    rule_name = Path(train_dataset_filename).stem.split('_')[0]
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    wandb.init(project="xaipatimg", name=f"{rule_name}-{timestamp}", config={
+        "learning_rate": lr,
+        "epochs": training_epochs,
+        "batch_size": batch_size,
+        "lr_step_size": lr_step_size,
+        "lr_gamma": lr_gamma,
+        "target_accuracy": target_accuracy,
+        "training_mode": training_mode,
+        "patience": patience,
+        "interval_batch": interval_batch
+    })
 
-    # Writing training set statistics to file
+    means, stds = compute_mean_std_dataset(
+        db_dir, train_dataset_filename, resnet18_preprocess_no_norm)
+    print(f"Train dataset statistics : " + str(means) + " " + str(stds))
     with open(os.path.join(model_dir, "train_set_stats.json"), "w") as f:
         json.dump({"mean": means, "std": stds}, f)
 
-    # Definition of complete preprocessing pipeline that includes normalization based on the training data
     preprocess = transforms.Compose([
         transforms.Resize(256),
         transforms.ToTensor(),
         transforms.Normalize(mean=means, std=stds)
     ])
 
-    # Importing the data
     dataset_train = PatImgDataset(db_dir, train_dataset_filename, transform=preprocess)
     dataset_valid = PatImgDataset(db_dir, valid_dataset_filename, transform=preprocess)
     training_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
     valid_loader = torch.utils.data.DataLoader(dataset_valid, batch_size=batch_size, shuffle=False)
 
-    # Creating the model
-    model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=False)
-    model.fc = Linear(in_features=512, out_features=2, bias=True)
+    model = torch.hub.load('pytorch/vision:v0.10.0',
+                           'resnet18', pretrained=False)
+    model.fc = Linear(512, 2)
     model = model.to(device)
 
-    # Creating the optimizer
-    optimizer = torch.optim.SGD(
-        model.parameters(),
-        lr=lr,
-        momentum=momentum,
-        weight_decay=weight_decay,
-    )
-
-    # Creating the loss function
+    optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
     loss_fn = torch.nn.CrossEntropyLoss()
+    scheduler = StepLR(optimizer, step_size=lr_step_size, gamma=lr_gamma)
 
-    # Creating the scheduler
-    StepLR(optimizer, step_size=lr_step_size, gamma=lr_gamma)
+    writer = SummaryWriter(
+        join(model_dir, "run/") + f'_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
 
-    # Initialization of the variables for the training
-    epoch_number = 0
-    vaccuracies = []
+    # --- Training State ---
     best_vloss = np.inf
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    writer = SummaryWriter(join(model_dir, "run/") + '_{}'.format(timestamp))
+    counter = 0
+    global_batch_nb = 0
+    stop_training = False
+    vaccuracies = []
 
-    # Main training loop
-    for epoch in range(training_epochs):
-        print('EPOCH {}:'.format(epoch_number + 1))
+    # --- Validation Helper ---
+    def _validate_and_log(current_avg_tloss, step):
+        nonlocal best_vloss, counter, stop_training, vaccuracies
 
-        # Make sure gradient tracking is on, and do a pass over the data
-        model.train(True)
-        avg_loss = _train_epoch(training_loader, model, optimizer, loss_fn, device, epoch_number, writer,
-                                train_loss_write_period_logs)
-
-        running_vloss = 0.0
-
-        # Set the model to evaluation mode
         model.eval()
-
-        # Disable gradient computation and reduce memory consumption.
+        running_vloss = 0.0
         correct = 0
-        size = 0
         with torch.no_grad():
             for i, vdata in enumerate(valid_loader):
                 vinputs, vlabels = vdata[0].to(device), vdata[1].to(device)
-                voutputs = model(vinputs.float())
-                vloss = loss_fn(voutputs, vlabels)
-                running_vloss += vloss
-                probabilities = torch.nn.functional.softmax(voutputs, dim=1)
-                correct += (probabilities.round().int().T[1] == vlabels).sum()
-                size += len(vdata)
+                vouts = model(vinputs.float())
+                running_vloss += loss_fn(vouts, vlabels).item()
+                probs = torch.softmax(vouts, dim=1)
+                correct += (probs.argmax(dim=1) == vlabels).sum().item()
+        model.train()
 
-        vaccuracy = correct / len(dataset_valid)
-        vaccuracies.append(vaccuracy.cpu())
         avg_vloss = running_vloss / (i + 1)
-        print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
+        vaccuracy = correct / len(dataset_valid)
+        vaccuracies.append(vaccuracy)
 
-        # Log the running loss averaged per batch
-        # for both training and validation
+        print(f'LOSS train {current_avg_tloss:.4f} valid {avg_vloss:.4f}')
+
         writer.add_scalars('Training vs. Validation Loss',
-                           {'Training': avg_loss, 'Validation': avg_vloss},
-                           epoch_number + 1)
+                           {'Training': current_avg_tloss,
+                               'Validation': avg_vloss},
+                           step)
         writer.add_scalars('Validation accuracy',
-                           {'Validation': vaccuracy},
-                           epoch_number + 1)
+                           {'Validation': vaccuracy}, step)
         writer.flush()
 
-        # Track best performance, and save the model's state
-        if avg_vloss < best_vloss:
-            best_vloss = avg_vloss
-            best_model_path = join(model_dir, "best_model")
-            torch.save(model.state_dict(), best_model_path)
-            best_model_epoch_file = join(model_dir, "best_model_epoch")
-            with open(best_model_epoch_file, "w") as f:
-                f.write(str(epoch_number + 1))
+        wandb_log = {"training_loss": current_avg_tloss,
+                     "validation_loss": avg_vloss, "vaccuracy": vaccuracy}
+       
+        if training_mode == "epoch":
+            wandb_log["epoch"] = step
+      
+        else:
+            wandb_log["global_batch_nb"] = step
+        wandb.log(wandb_log)
 
-        epoch_number += 1
+        early_stop, new_counter, new_best_vloss = _check_early_stopping(
+            vaccuracy, target_accuracy, avg_vloss, best_vloss, counter, patience, model, model_dir, training_mode, step)
+
+        counter = new_counter
+        best_vloss = new_best_vloss
+        if early_stop:
+            stop_training = True
+
+    # --- Training Loop ---
+    running_tloss = 0.0
+    curr_epoch_batch_nb = 0
+
+    for epoch in range(training_epochs):
+        if stop_training:
+            break
+
+        print(f"EPOCH {epoch + 1}:")
+        model.train()
+
+        for batch_idx, data in enumerate(training_loader, 1):
+            if stop_training:
+                break
+
+            inputs, labels = data[0].to(device), data[1].to(device)
+            optimizer.zero_grad()
+            loss = loss_fn(model(inputs.float()), labels)
+            loss.backward()
+            optimizer.step()
+
+            running_tloss += loss.item()
+            curr_epoch_batch_nb += 1
+            global_batch_nb += 1
+
+            if global_batch_nb % train_loss_write_period_logs == 0:
+                avg_loss = running_tloss / curr_epoch_batch_nb
+                writer.add_scalar('Loss/train', avg_loss, global_batch_nb)
+
+            # training_mode == batch
+            if training_mode == "batch" and global_batch_nb % interval_batch == 0:
+                avg_tloss = running_tloss / curr_epoch_batch_nb
+                _validate_and_log(avg_tloss, global_batch_nb)
+                running_tloss = 0.0
+                curr_epoch_batch_nb = 0
+
+        #   #training_mode == epoch mode 
+        if training_mode == "epoch" and curr_epoch_batch_nb > 0 and not stop_training:
+            avg_loss = running_tloss / curr_epoch_batch_nb
+            _validate_and_log(avg_loss, epoch + 1)
+            running_tloss = 0.0
+            curr_epoch_batch_nb = 0
+
+        # ── catch‑up validation if batch‑mode hasn’t fired this epoch ─
+        if training_mode == "batch" and curr_epoch_batch_nb > 0 and not stop_training:
+            avg_tloss = running_tloss / curr_epoch_batch_nb
+            _validate_and_log(avg_tloss, global_batch_nb)
+            running_tloss = 0.0
+            curr_epoch_batch_nb = 0
+
+        scheduler.step()
+
+    writer.close()
+    wandb.finish()
+
+    final_model_path = os.path.join(model_dir, "final_model")
+    torch.save(model.state_dict(), final_model_path)
+    print("Training complete")
+
 
 def make_prediction(model, X, device):
     """
@@ -272,9 +354,11 @@ def make_prediction(model, X, device):
     """
     with torch.no_grad():
         outputs = model(X.to(device).float())
-        probabilities = torch.nn.functional.softmax(outputs, dim=1).cpu().numpy().reshape(-1, 2).T[1].tolist()
+        probabilities = torch.nn.functional.softmax(
+            outputs, dim=1).cpu().numpy().reshape(-1, 2).T[1].tolist()
     y_pred = np.round(probabilities).astype(int)
     return y_pred, probabilities
+
 
 def _compute_scores(data_loader, model, device):
     probabilities_all = []
@@ -297,19 +381,22 @@ def _compute_scores(data_loader, model, device):
         }
     }
 
+
 def load_resnet18_based_model(model_dir, device):
     """
     Creating a resnet18 model with two output features and loading the weights from the model stored in the given
     directory.
-    :param model_dir: path to model directory (contains a file called best_model).
+    :param model_dir: path to model directory (contains a file called final_model).
     :param device: device on which to run the model.
     :return: the model.
     """
     model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=False)
     model.fc = Linear(in_features=512, out_features=2, bias=True)
-    model.load_state_dict(torch.load(os.path.join(model_dir, "best_model"), weights_only=True))
+
+    model.load_state_dict(torch.load(os.path.join(model_dir, "final_model"), weights_only=True))
     model.eval()
     return model.to(device)
+
 
 def get_dataset_transformed(db_dir, model_dir, dataset_filename, max_size=None):
     """
@@ -375,3 +462,50 @@ def compute_resnet18_model_scores(db_dir, train_dataset_filename, test_dataset_f
 
     print(results)
     return results
+
+
+def save_classification(db_dir, test_dataset_filename, model_dir, classification_dir, device="cuda:0", max_items=None):
+    from xaipatimg.ml.xai import _create_dirs, _get_subfolder
+    """
+    Copy every image listed in test dataset into TP / TN / FP / FN folders to observer what the model got right or wrong.
+    :param db_dir: path to the root directory of the database.
+    :param test_dataset_filename: filename of the csv test dataset file.
+    :param model_dir: path to the directory of the model.
+    :param classification_dir: path to the root directory of the classified image
+    :param max_items: maximum number of items to copy.
+    :param device: device on which to run the model.
+    """
+
+    split_name = Path(test_dataset_filename).stem.rsplit("_", 1)[0]
+    classification_dir = os.path.join(classification_dir, split_name)
+
+    # makes TP / TN / FP / FN sub-folders
+    _create_dirs(classification_dir)
+
+    # Load model and dataset
+    model = load_resnet18_based_model(model_dir, device)
+    model.eval()
+
+    dataset = get_dataset_transformed(
+        db_dir=db_dir,
+        model_dir=model_dir,
+        dataset_filename=test_dataset_filename,
+        max_size=max_items,
+    )
+
+    # Run inference & copy originals
+    for idx in range(len(dataset)):
+        img, true_label = dataset[idx]
+
+        pred_label, _ = make_prediction(model, img.unsqueeze(0), device)
+        pred_label = int(pred_label[0])
+
+        subfolder = _get_subfolder(pred_label, true_label)
+        if subfolder is None:  # guard against unexpected labels
+            raise ValueError(
+                f"Unsupported label pair: pred={pred_label}, true={true_label}")
+
+        source = dataset.get_path(idx)
+        output = os.path.join(classification_dir,
+                              subfolder, os.path.basename(source))
+        shutil.copy2(source, output)
