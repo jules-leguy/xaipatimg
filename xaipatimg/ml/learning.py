@@ -126,10 +126,6 @@ def _check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, c
     """
     label = "Epoch" if mode == "epoch" else "Step"
     model_path = join(model_dir, "final_model")
-    
-    #disable early_stop is patience = none
-    if patience is None:
-        return False, counter, best_loss
 
     # Stop if accuracy threshold is reached
     if vaccuracy >= target_accuracy:
@@ -137,7 +133,11 @@ def _check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, c
         torch.save(model.state_dict(), cap_path)
         print(f"Accuracy cap hit at {label} {step}")
         return True, counter, best_loss
-    
+
+    if patience is None:
+        return False, counter, best_loss
+
+    # Patience criterion if defined
     if current_loss < best_loss:
         best_loss = current_loss
         counter = 0
