@@ -344,11 +344,12 @@ def _cf_single_sample(db_dir, sample_idx, xai_output_path, counterfactual_fun, i
     shutil.rmtree(temp_dir)
 
 
-def generate_counterfactuals_resnet18(db_dir, dataset_filename, model_dir, counterfactual_fun, nb_cf,
+def generate_counterfactuals_resnet18(db_dir, db, dataset_filename, model_dir, counterfactual_fun, nb_cf,
                                       device="cuda:0", n_jobs=-1, dataset_size=None):
     """
     Generating counterfactual explanations for the given model and dataset.
     :param db_dir: root of the database.
+    :param db: database content.
     :param dataset_filename: filename of the dataset.
     :param model_dir: path of the model directory.
     :param counterfactual_fun : function generating possible counterfactual explanations for the specific rule of
@@ -373,9 +374,6 @@ def generate_counterfactuals_resnet18(db_dir, dataset_filename, model_dir, count
 
     # Make prediction
     X, y, y_pred, model = _predict(model_dir, device, dataset)
-
-    # Load database
-    db = load_db(db_dir)
 
     # Parallel computation of the images for the whole dataset.
     print("Generating counterfactual images")
