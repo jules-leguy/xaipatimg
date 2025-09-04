@@ -94,7 +94,7 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
             "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", font_size)
     except IOError:
         print("Warning: LiberationSans-Regular.ttf not found. Falling back to the default font.")
-        font = ImageFont.load_default()
+        font = ImageFont.load_default(size=font_size)
 
     # Columns: A, B, C, …
     for col in range(division[0]):

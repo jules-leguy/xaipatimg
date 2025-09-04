@@ -130,8 +130,10 @@ def _check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, c
     if vaccuracy >= target_accuracy:
         cap_path = join(model_dir, model_path)
         torch.save(model.state_dict(), cap_path)
-        print(f"Accuracy cap hit at {label} {step}")
+        print(f"Accuracy cap hit at {label} {step} : {vaccuracy} >= {target_accuracy}")
         return True, counter, best_loss
+    elif target_accuracy <= 1.0:
+        print(f"Accuracy cap NOT hit at {label} {step} : {vaccuracy} < {target_accuracy}")
 
     if patience is None:
         return False, counter, best_loss
