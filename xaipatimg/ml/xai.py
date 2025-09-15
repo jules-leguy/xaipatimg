@@ -141,7 +141,8 @@ def generate_cam_resnet18(cam_technique, db_dir, dataset_filename, model_dir, de
                 cv2.imwrite(os.path.join(curr_folder, str(i) + "_target_" + str(j) + ".jpg"), visualization)
 
 
-def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_pred, y, shap_values_lim):
+def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_pred, y, shap_values_lim,
+                        shap_scale_img_path):
     """
     Compute and saves shap explanations for single sample of index i.
     :param sample_idx: index of the sample.
@@ -150,6 +151,8 @@ def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_p
     :param xai_output_path: path where to save the results.
     :param y_pred: prediction of the model for the current sample.
     :param y: label of the current sample.
+    :param shap_scale_img_path : path to the image that represents the shap color scale and which will be added to the
+    bottom of the generated explanation. Will be ignored if None.
     :return: Non
     """
 
@@ -187,16 +190,45 @@ def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_p
     # Extracting the three subparts of the image plot
     original_image = process_img(im.crop((w_step * 0, 0, w_step * 1, h)))
     shap_expl_1 = process_img(im.crop((w_step * 1, 0, w_step * 2, h)))
-    shap_expl_2 = process_img(im.crop((w_step * 2, 0, w_step * 3, h)))
+
+    # Adding the color scale to the SHAP explanation image
+    if shap_scale_img_path is not None:
+
+        scale_img = Image.open(shap_scale_img_path)
+
+        # Get the target width
+        target_width = shap_expl_1.width
+
+        # Compute the proportional height
+        w_percent = target_width / scale_img.width
+        target_height = int(scale_img.height * w_percent)
+
+        # Resize with high-quality resampling
+        scale_img = scale_img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+
+        # Determine final canvas size
+        final_width = max(shap_expl_1.width, scale_img.width)
+        final_height = shap_expl_1.height + scale_img.height
+
+        # Create a new blank image with appropriate mode
+        combined = Image.new(shap_expl_1.mode, (final_width, final_height),(255, 255, 255))
+
+        # Compute horizontal offsets to center images if widths differ
+        x1 = (final_width - shap_expl_1.width) // 2
+        x2 = (final_width - scale_img.width) // 2
+
+        # Paste images
+        combined.paste(shap_expl_1, (x1, 0))
+        combined.paste(scale_img, (x2, shap_expl_1.height))
+        shap_expl_1 = combined
 
     # Saving the images to disk
     original_image.save(os.path.join(curr_folder, str(sample_idx + 1) + ".jpg"))
     shap_expl_1.save(os.path.join(curr_folder, str(sample_idx + 1) + "target_" + "0" + ".jpg"))
-    shap_expl_2.save(os.path.join(curr_folder, str(sample_idx + 1) + "target_" + "1" + ".jpg"))
 
 
 def generate_shap_resnet18(db_dir, dataset_filename, model_dir, device="cuda:0", n_jobs=-1, dataset_size=None,
-                           masker="blur(128,128)"):
+                           masker="blur(128,128)", shap_scale_img_path=None):
     """
     Generating shap explanations for the given model and dataset, which are stored into the model directory.
     :param db_dir: root of the database.
@@ -209,6 +241,8 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, device="cuda:0",
     :param masker : masker to be applied on masked regions of the image (default : blurring). If "ndarray" is specified,
     a numpy array of the dimension of the image is created, with values corresponding to the white areas of the image.
     Thus, the mask applied is a white zone that actually removes symbols from the image.
+    :param shap_scale_img_path : path to the image that represents the shap color scale and which will be added to the
+    bottom of the generated explanation. Will be ignored if None.
     :return: None.
     """
 
@@ -240,7 +274,7 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, device="cuda:0",
     if masker == "ndarray":
         masker = np.ones((256, 256, 3)).reshape(-1, ) * np.max(X)
 
-    masker_f = shap.maskers.Image(masker, Xtr[0].shape, segmentation=None)
+    masker_f = shap.maskers.Image(masker, Xtr[0].shape)
 
     def predict(img: torch.Tensor) -> torch.Tensor:
         img = torch.from_numpy(img)
@@ -261,7 +295,7 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, device="cuda:0",
     #     )
 
     shap_values = explainer(
-        Xtr, max_evals=36, batch_size=50
+        Xtr, max_evals=10000, batch_size=50
     )
     min_shap_value = np.min(shap_values.values)
     max_shap_value = np.max(shap_values.values)
@@ -270,7 +304,7 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, device="cuda:0",
     print("Generating shap images")
     Parallel(n_jobs=n_jobs)(delayed(_shap_single_sample)(
         i, shap_values.values[i: i + 1], img_numpy[i: i + 1],
-        xai_output_path, y_pred[i], y[i], (min_shap_value, max_shap_value)) for i in tqdm.tqdm(range(len(X))))
+        xai_output_path, y_pred[i], y[i], (min_shap_value, max_shap_value), shap_scale_img_path) for i in tqdm.tqdm(range(len(X))))
 
 
 def _cf_single_sample(db_dir, sample_idx, xai_output_path, counterfactual_fun, img_entry, y, y_pred, nb_cf, model_dir, device):
