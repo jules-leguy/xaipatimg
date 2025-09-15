@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 
 from xaipatimg.datagen.dbimg import load_db
 from xaipatimg.datagen.genimg import gen_img
-from xaipatimg.datagen.utils import get_coords_diff, PatImgObj
+from xaipatimg.datagen.utils import get_coords_diff, PatImgObj, random_mutation
 from xaipatimg.ml import resnet18_preprocess_no_norm
 from xaipatimg.ml.learning import load_resnet18_based_model, get_dataset_transformed, make_prediction
 import numpy as np
@@ -240,7 +240,7 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, device="cuda:0",
     if masker == "ndarray":
         masker = np.ones((256, 256, 3)).reshape(-1, ) * np.max(X)
 
-    masker_f = shap.maskers.Image(masker, Xtr[0].shape)
+    masker_f = shap.maskers.Image(masker, Xtr[0].shape, segmentation=None)
 
     def predict(img: torch.Tensor) -> torch.Tensor:
         img = torch.from_numpy(img)
@@ -261,7 +261,7 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, device="cuda:0",
     #     )
 
     shap_values = explainer(
-        Xtr, max_evals=1000, batch_size=50
+        Xtr, max_evals=36, batch_size=50
     )
     min_shap_value = np.min(shap_values.values)
     max_shap_value = np.max(shap_values.values)
@@ -381,3 +381,142 @@ def generate_counterfactuals_resnet18(db_dir, dataset_filename, model_dir, count
     print("Generating counterfactual images")
     Parallel(n_jobs=n_jobs)(delayed(_cf_single_sample)(
         db_dir, i, xai_output_path, counterfactual_fun, db[dataset.get_id(i)], y[i], y_pred[i], nb_cf, model_dir, device) for i in tqdm.tqdm(range(len(X))))
+
+
+
+def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_entry, y, y_pred, model_dir, device,
+                                      max_depth, nb_tries_per_depth, shapes, colors, empty_probability):
+    """
+    Generating a set of counterfactual explanations for a single sample with the random approach.
+    :param db_dir: path of the database.
+    :param sample_idx: index of the sample.
+    :param xai_output_path: path where to save the xai explanations.
+    :param img_entry: entry of the image in the database.
+    :param y: class of the sample.
+    :param y_pred: predicted class of the sample.
+    :param model_dir: path of the model directory.
+    :param device: device to use for pytorch computation.
+    :param max_depth: maximum number of random mutations in the generated counterfactuals.
+    :param nb_tries_per_depth: number of mutations which are assessed for each depth.
+    :param shapes: list of possible shapes.
+    :param colors: list of possible colors.
+    :param empty_probability: probability of an empty cell.
+    :return: None
+    """
+
+    cf_found = False
+
+    for curr_depth in range(1, max_depth + 1):
+
+        if cf_found:
+            break
+
+        counterfactuals_dict_list = []
+
+        # Generate possible counterfactuals of given mutation depth
+        for _ in range(nb_tries_per_depth):
+            counterfactuals_dict_list.append(random_mutation(img_entry, curr_depth, shapes, colors, empty_probability))
+
+        # Create the temporary directory and store the path
+        temp_dir = tempfile.mkdtemp()
+
+        # Saving the original image
+        og_img_path = join(temp_dir, "original.png")
+        gen_img(og_img_path, img_entry["content"], img_entry["division"], img_entry["size"])
+
+        possible_cf_paths = []
+        # Writing the possible counterfactuals into the temporary directory
+        for cf_id, cf_dict in enumerate(counterfactuals_dict_list):
+            curr_cf_path = join(temp_dir, str(cf_id) + ".png")
+            possible_cf_paths.append(curr_cf_path)
+            gen_img(curr_cf_path, cf_dict["content"], cf_dict["division"], cf_dict["size"])
+
+        # Writing a CSV dataset of counterfactuals to be able to pass them through the model
+        dataset_path = os.path.join(temp_dir, "dataset.csv")
+        y_cf = [None for _ in range(len(possible_cf_paths))] # These values will not be used so they are set to None
+        csv_content_train = np.array([np.concatenate((["path"], possible_cf_paths), axis=0),
+                                      np.concatenate((["class"], y_cf), axis=0)]).T
+        with open(dataset_path, 'w') as f:
+            writer = csv.writer(f)
+            writer.writerows(csv_content_train)
+
+        # Verifying that the generated samples are actual counterfactuals according to the model
+        dataset = get_dataset_transformed(db_dir, model_dir, dataset_path)
+        _, _, y_pred_cf, _ = _predict(model_dir, device, dataset)
+        actual_cf_idx_list = []
+        for y_pred_cf_idx, y_pred_curr_cf in enumerate(y_pred_cf):
+            # Exclusive or to check that the values are different
+            if bool(y_pred) ^ bool(y_pred_curr_cf):
+                actual_cf_idx_list.append(y_pred_cf_idx)
+                cf_found = True
+                break
+
+        # Computing output path depending on target class and prediction
+        curr_folder = os.path.join(xai_output_path, _get_subfolder(y_pred, y))
+
+        # Copying the actual original image into the XAI output directory
+        shutil.copyfile(og_img_path, os.path.join(curr_folder, str(sample_idx + 1) + ".png"))
+
+        # Generating counterfactual images for every actual counterfactual. Highlighting the cells where the counterfactual
+        # differs from the original image.
+        for actual_cf_idx in actual_cf_idx_list:
+            cf_dict = counterfactuals_dict_list[actual_cf_idx]
+            coords_diff = get_coords_diff(PatImgObj(img_entry), PatImgObj(cf_dict))
+            gen_img(os.path.join(curr_folder, str(sample_idx + 1) + "cf_" + str(actual_cf_idx) + "depth_" + str(curr_depth) + ".png"),
+                    cf_dict["content"], cf_dict["division"], cf_dict["size"], to_highlight=coords_diff)
+
+        # Removing the temporary dictionary
+        shutil.rmtree(temp_dir)
+
+
+def generate_counterfactuals_resnet18_random_approach(db_dir, dataset_filename, model_dir, shapes, colors,
+                                                      empty_probability, max_depth, nb_tries_per_depth,device="cuda:0",
+                                                      n_jobs=-1, dataset_size=None):
+    """
+    Generating counterfactual explanations for the given model and dataset. Explanations are obtained by assessing
+    randomly mutated images. A mutation consists in randomly changing the content of a cell of the image.
+    The algorithm used is the following:
+
+    for curr_depth in (1..max_depth):
+        for curr_try in (1..nb_tries_per_depth):
+            cf_try <- random_mutation(depth=curr_depth)
+            if cf_try is a counterfactual:
+                return cf_try
+
+    :param db_dir: root of the database.
+    :param dataset_filename: filename of the dataset.
+    :param model_dir: path of the model directory.
+    the dataset based on the image entry, the class of the sample and the number of possible counterfactuals to generate.
+    Expected signature : fun(img_entry, y, nb_cf).
+    :param device: device to use for pytorch computation.
+    :param n_jobs: number of jobs to run in parallel.
+    :param dataset_size: elements of the dataset are loaded until the size reaches this value. If None, the whole
+    dataset is loaded.
+    :param max_depth: maximum number of random mutations in the generated counterfactuals.
+    :param nb_tries_per_depth: number of mutations which are assessed for each depth.
+    :param shapes: list of possible shapes.
+    :param colors: list of possible colors.
+    :param empty_probability: probability of an empty cell.
+    :return: None.
+       """
+
+    # Creating directories
+    xai_output_path = os.path.join(model_dir, "xai_" + pathlib.Path(dataset_filename).stem + "_random_" + "cf")
+    _create_dirs(xai_output_path)
+
+    # Loading data
+    dataset = get_dataset_transformed(db_dir, model_dir, dataset_filename, max_size=dataset_size)
+
+    # Make prediction
+    X, y, y_pred, model = _predict(model_dir, device, dataset)
+
+    # Load database
+    db = load_db(db_dir)
+
+    # Parallel computation of the images for the whole dataset.
+    print("Generating counterfactual images")
+    Parallel(n_jobs=n_jobs)(delayed(_cf_single_sample_random_approach)(
+        db_dir, i, xai_output_path, db[dataset.get_id(i)], y[i], y_pred[i], model_dir,
+        device, max_depth, nb_tries_per_depth, shapes, colors, empty_probability) for i in tqdm.tqdm(range(len(X))))
+
+
