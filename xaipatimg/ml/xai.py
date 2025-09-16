@@ -219,7 +219,7 @@ def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_p
 
         # Paste images
         combined.paste(shap_expl_1, (x1, 0))
-        combined.paste(scale_img, (x2, shap_expl_1.height))
+        combined.paste(scale_img, (x2, int(shap_expl_1.height - 0.8 * scale_img.height)))
         shap_expl_1 = combined
 
     # Saving the images to disk
