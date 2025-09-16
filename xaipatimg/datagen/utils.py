@@ -1,7 +1,7 @@
 import copy
+import random
 
 import numpy as np
-from networkx.classes import is_empty
 
 
 def gen_rand_sym(shapes, colors):
@@ -31,6 +31,32 @@ def get_coords_diff(patimgobj1, patimgobj2):
                 coords_list.append((x, y))
     return coords_list
 
+def random_mutation(img_dict, depth, shapes, colors, empty_probability):
+    """
+    Performing random mutations in the given image.
+    :param img_dict: dictionary description of the image.
+    :param depth: number of random mutations.
+    :param shapes: list of possible shapes.
+    :param colors: list of possible colors.
+    :param empty_probability: probability of an empty cell.
+    :return:
+    """
+
+    obj = PatImgObj(img_dict)
+
+    for _ in range(depth):
+
+        # Random coordinate generation
+        pos_x = np.random.choice(np.arange(0, obj.division[0]))
+        pos_y = np.random.choice(np.arange(0, obj.division[1]))
+
+        # Mutation
+        if random.random() < empty_probability:
+            obj.remove_symbol(pos_x, pos_y)
+        else:
+            obj.set_symbol(pos_x, pos_y, gen_rand_sym(shapes, colors))
+
+    return obj.get_img_dict()
 
 class PatImgObj:
     """ Representing XAI pattern images as a Python object to facilitate the edition of the content """
