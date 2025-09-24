@@ -48,12 +48,13 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
     to_highlight = set(to_highlight or [])
 
     # Exit if the file already exists and overwrite is set to False
-    already_exists = os.path.exists(img_path)
-    if already_exists and not overwrite:
-        return
+    if img_path is not None:
+        already_exists = os.path.exists(img_path)
+        if already_exists and not overwrite:
+            return
 
-    img_dir_path = os.path.dirname(img_path)
-    os.makedirs(img_dir_path, exist_ok=True)
+        img_dir_path = os.path.dirname(img_path)
+        os.makedirs(img_dir_path, exist_ok=True)
 
     # Create a blank white image
     img = Image.new("RGB", dimension, color="white")
@@ -145,7 +146,10 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
         )
 
     # Save the image
-    img.save(img_path)
+    if img_path is not None:
+        img.save(img_path)
+
+    return img
 
 def gen_img_and_save_db(db, db_dir, overwrite=False, n_jobs=1):
     """
