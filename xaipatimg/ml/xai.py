@@ -1,4 +1,5 @@
 import csv
+import json
 import os
 import pathlib
 import shutil
@@ -11,13 +12,14 @@ from pytorch_grad_cam import GradCAM
 import torch
 from pytorch_grad_cam.utils.image import show_cam_on_image
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
-from PIL import Image, ImageChops
+from PIL import Image, ImageFont, ImageDraw
 import matplotlib.pyplot as plt
 
 from xaipatimg.datagen.dbimg import load_db
 from xaipatimg.datagen.genimg import gen_img
 from xaipatimg.datagen.utils import get_coords_diff, PatImgObj, random_mutation
 from xaipatimg.ml import resnet18_preprocess_no_norm
+from xaipatimg.ml._colors import red_transparent_green
 from xaipatimg.ml.learning import load_resnet18_based_model, get_dataset_transformed, make_prediction
 import numpy as np
 import io
@@ -79,6 +81,150 @@ def _predict(model_dir, device, dataset):
 
     return X, y, y_pred, model
 
+def _vertical_concatenation(top_img, bottom_img):
+    """
+    Vertical concatenation of two images. The final image keeps the width of the top image. The height of the bottom
+    image might be adjusted so that the ratios are kept.
+
+    :param top_img: top image
+    :param bottom_img: bottom image
+    :return: contatenated image
+    """
+
+    # Get the target width
+    target_width = top_img.width
+
+    # Compute the proportional height
+    w_percent = target_width / bottom_img.width
+    target_height = int(bottom_img.height * w_percent)
+
+    # Resize with high-quality resampling
+    bottom_img = bottom_img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+
+    # Determine final canvas size
+    final_width = max(top_img.width, bottom_img.width)
+    final_height = top_img.height + bottom_img.height
+
+    # Create a new blank image with appropriate mode
+    combined = Image.new(top_img.mode, (final_width, final_height), (255, 255, 255))
+
+    # Compute horizontal offsets to center images if widths differ
+    x1 = (final_width - top_img.width) // 2
+    x2 = (final_width - bottom_img.width) // 2
+
+    # Paste images
+    combined.paste(top_img, (x1, 0))
+    combined.paste(bottom_img, (x2, int(top_img.height - 0.2 * bottom_img.height)))
+    return combined
+
+def _generate_displayable_explanation(model_pred, explanation_img, yes_pred_img_path, no_pred_img_path, out_path,
+                                      output_size, left_ratio=0.5, font_size=40, padding=20, AI_only=False):
+    """
+    Generating the image that can be displayed to users and that contains both the prediction of the model and the
+    generated explanation.
+    Left size : model prediction. Right size : explanation.
+    If AI_only is set to True, only the model prediction will be displayed.
+
+    :param model_pred: model prediction.
+    :param explanation_img: explanation image.
+    :param yes_pred_img_path: Image which represents a "yes" prediction.
+    :param no_pred_img_path: Image which represents a "no" prediction.
+    :param out_path: path where the image is saved.
+    :param output_size: size of the output image in pixels.
+    :param left_ratio: proportion of the image to be displayed on the left side.
+    :param font_path: path to the font to be used.
+    :param font_size: font size.
+    :param padding: padding.
+    :param AI_only: If True, only the model prediction will be displayed.
+    :return:
+    """
+
+    total_width, total_height = output_size
+
+    # Load prediction image
+    pred_img = Image.open(yes_pred_img_path if model_pred == 1 else no_pred_img_path).convert("RGBA")
+
+    try:
+        font = ImageFont.truetype(
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", font_size)
+    except IOError:
+        print("Warning: LiberationSans-Regular.ttf not found. Falling back to default font.")
+        font = ImageFont.load_default()
+
+    left_title = "AI prediction"
+    right_title = "AI justification"
+
+    # Measure text
+    tmp_draw = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    left_text_w = tmp_draw.textlength(left_title, font=font)
+    left_text_h = font.getbbox(left_title)[3] - font.getbbox(left_title)[1]
+    if not AI_only:
+        right_text_w = tmp_draw.textlength(right_title, font=font)
+        right_text_h = font.getbbox(right_title)[3] - font.getbbox(right_title)[1]
+
+    def scale_to_fit(img, max_w, max_h):
+        w, h = img.size
+        scale = min(max_w / w, max_h / h)
+        return img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
+    canvas = Image.new("RGBA", (total_width, total_height), (255, 255, 255, 255))
+    draw = ImageDraw.Draw(canvas)
+
+    if AI_only:
+        # --- Single centered panel, but keep left_ratio width ---
+        panel_width = int(total_width * left_ratio)
+        panel_x = (total_width - panel_width) // 2  # horizontally center the panel
+
+        max_img_height = total_height - (left_text_h + 3 * padding)
+        pred_img_resized = scale_to_fit(pred_img,
+                                        panel_width - 2 * padding,
+                                        max_img_height)
+
+        block_height = left_text_h + padding + pred_img_resized.height
+        top_block = (total_height - block_height) // 2
+
+        text_x = panel_x + padding + (panel_width - left_text_w) // 2
+        draw.text((text_x, top_block), left_title, fill="black", font=font)
+
+        canvas.paste(pred_img_resized,
+                     (panel_x + padding + (panel_width - pred_img_resized.width) // 2,
+                      top_block + left_text_h + padding),
+                     pred_img_resized)
+
+    else:
+        # --- Two panels ---
+        left_panel_width = int(total_width * left_ratio)
+        right_panel_width = total_width - left_panel_width
+
+        max_left_img_height = total_height - (left_text_h + 3 * padding)
+        pred_img_resized = scale_to_fit(pred_img,
+                                        left_panel_width - 2 * padding,
+                                        max_left_img_height)
+
+        block_height_left = left_text_h + padding + pred_img_resized.height
+        top_left_block = (total_height - block_height_left) // 2
+        left_text_x = padding + (left_panel_width - left_text_w) // 2
+        draw.text((left_text_x, top_left_block), left_title, fill="black", font=font)
+        canvas.paste(pred_img_resized,
+                     (padding + (left_panel_width - pred_img_resized.width) // 2,
+                      top_left_block + left_text_h + padding),
+                     pred_img_resized)
+
+        # Right panel
+        max_right_img_height = total_height - (right_text_h + 3 * padding)
+        justif_img_resized = scale_to_fit(explanation_img.convert("RGBA"),
+                                          right_panel_width - 2 * padding,
+                                          max_right_img_height)
+
+        right_offset_x = left_panel_width
+        right_text_x = right_offset_x + padding + (right_panel_width - right_text_w) // 2
+        draw.text((right_text_x, padding), right_title, fill="black", font=font)
+        canvas.paste(justif_img_resized,
+                     (right_offset_x + padding + (right_panel_width - justif_img_resized.width) // 2,
+                      padding + right_text_h + padding),
+                     justif_img_resized)
+
+    canvas.save(out_path)
 
 def generate_cam_resnet18(cam_technique, db_dir, dataset_filename, model_dir, device="cuda:0"):
     """
@@ -142,7 +288,7 @@ def generate_cam_resnet18(cam_technique, db_dir, dataset_filename, model_dir, de
 
 
 def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_pred, y, shap_values_lim,
-                        shap_scale_img_path):
+                        shap_scale_img_path, yes_pred_img_path, no_pred_img_path):
     """
     Compute and saves shap explanations for single sample of index i.
     :param sample_idx: index of the sample.
@@ -153,6 +299,8 @@ def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_p
     :param y: label of the current sample.
     :param shap_scale_img_path : path to the image that represents the shap color scale and which will be added to the
     bottom of the generated explanation. Will be ignored if None.
+    :param yes_pred_img_path: path to the image that represent a yes prediction
+    :param no_pred_img_path: path to the image that represent a no prediction
     :return: Non
     """
 
@@ -164,7 +312,8 @@ def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_p
 
     # Plotting the output that contains the explanations, and removing the legend
     shap.image_plot(shap_values=shap_values, pixel_values=img_numpy, show=False, width=18,
-                    colormap_lim=max(abs(shap_values_lim[0]), abs(shap_values_lim[1])))
+                    colormap_lim=max(abs(shap_values_lim[0]), abs(shap_values_lim[1])),
+                    cmap=red_transparent_green)
     
     plt.gcf().axes[-1].remove()
 
@@ -193,42 +342,23 @@ def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_p
 
     # Adding the color scale to the SHAP explanation image
     if shap_scale_img_path is not None:
-
         scale_img = Image.open(shap_scale_img_path)
-
-        # Get the target width
-        target_width = shap_expl_1.width
-
-        # Compute the proportional height
-        w_percent = target_width / scale_img.width
-        target_height = int(scale_img.height * w_percent)
-
-        # Resize with high-quality resampling
-        scale_img = scale_img.resize((target_width, target_height), Image.Resampling.LANCZOS)
-
-        # Determine final canvas size
-        final_width = max(shap_expl_1.width, scale_img.width)
-        final_height = shap_expl_1.height + scale_img.height
-
-        # Create a new blank image with appropriate mode
-        combined = Image.new(shap_expl_1.mode, (final_width, final_height),(255, 255, 255))
-
-        # Compute horizontal offsets to center images if widths differ
-        x1 = (final_width - shap_expl_1.width) // 2
-        x2 = (final_width - scale_img.width) // 2
-
-        # Paste images
-        combined.paste(shap_expl_1, (x1, 0))
-        combined.paste(scale_img, (x2, int(shap_expl_1.height - 0.8 * scale_img.height)))
-        shap_expl_1 = combined
+        shap_expl_1 = _vertical_concatenation(shap_expl_1, scale_img)
 
     # Saving the images to disk
     original_image.save(os.path.join(curr_folder, str(sample_idx + 1) + ".jpg"))
-    shap_expl_1.save(os.path.join(curr_folder, str(sample_idx + 1) + "target_" + "0" + ".jpg"))
+
+    output_img_path = os.path.join(curr_folder, str(sample_idx + 1) + "shap.png")
+    _generate_displayable_explanation(y_pred, shap_expl_1, yes_pred_img_path, no_pred_img_path, output_img_path,
+                                      output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5)
+
+    output_img_AIonly_path = os.path.join(curr_folder, str(sample_idx + 1) + "AIonly.png")
+    _generate_displayable_explanation(y_pred, shap_expl_1, yes_pred_img_path, no_pred_img_path, output_img_AIonly_path,
+                                      output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5, AI_only=True)
 
 
-def generate_shap_resnet18(db_dir, dataset_filename, model_dir, device="cuda:0", n_jobs=-1, dataset_size=None,
-                           masker="blur(128,128)", shap_scale_img_path=None):
+def generate_shap_resnet18(db_dir, dataset_filename, model_dir, yes_pred_img_path, no_pred_img_path, device="cuda:0",
+                           n_jobs=-1, dataset_size=None, masker="blur(128,128)", shap_scale_img_path=None):
     """
     Generating shap explanations for the given model and dataset, which are stored into the model directory.
     :param db_dir: root of the database.
@@ -243,6 +373,9 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, device="cuda:0",
     Thus, the mask applied is a white zone that actually removes symbols from the image.
     :param shap_scale_img_path : path to the image that represents the shap color scale and which will be added to the
     bottom of the generated explanation. Will be ignored if None.
+    :param yes_pred_img_path: path the image that represents the yes prediction.
+    :param no_pred_img_path: path the image that represents the no prediction.
+
     :return: None.
     """
 
@@ -306,118 +439,10 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, device="cuda:0",
         i, shap_values.values[i: i + 1], img_numpy[i: i + 1],
         xai_output_path, y_pred[i], y[i], (min_shap_value, max_shap_value), shap_scale_img_path) for i in tqdm.tqdm(range(len(X))))
 
-
-def _cf_single_sample(db_dir, sample_idx, xai_output_path, counterfactual_fun, img_entry, y, y_pred, nb_cf, model_dir, device):
-    """
-    Generating a set of counterfactual explanations for a single sample.
-    :param db_dir: path of the database.
-    :param sample_idx: index of the sample.
-    :param xai_output_path: path where to save the xai explanations.
-    :param counterfactual_fun: function generating possible counterfactual explanations for the specific rule of
-    the dataset based on the image entry, the class of the sample and the number of possible counterfactuals to generate.
-    Expected signature : fun(img_entry, y, nb_cf).
-    :param img_entry: entry of the image in the database.
-    :param y: class of the sample.
-    :param y_pred: predicted class of the sample.
-    :param nb_cf: number of possible counterfactuals to generate.
-    :param model_dir: path of the model directory.
-    :param device: device to use for pytorch computation.
-    :return: None
-    """
-
-    # Generate possible counterfactuals
-    counterfactuals_dict_list = counterfactual_fun(img_entry, y_pred, nb_cf)
-
-    # Create the temporary directory and store the path
-    temp_dir = tempfile.mkdtemp()
-
-    # Saving the original image
-    og_img_path = join(temp_dir, "original.png")
-    gen_img(og_img_path, img_entry["content"], img_entry["division"], img_entry["size"])
-
-    possible_cf_paths = []
-    # Writing the possible counterfactuals into the temporary directory
-    for cf_id, cf_dict in enumerate(counterfactuals_dict_list):
-        curr_cf_path = join(temp_dir, str(cf_id) + ".png")
-        possible_cf_paths.append(curr_cf_path)
-        gen_img(curr_cf_path, cf_dict["content"], cf_dict["division"], cf_dict["size"])
-
-    # Writing a CSV dataset of counterfactuals to be able to pass them through the model
-    dataset_path = os.path.join(temp_dir, "dataset.csv")
-    y_cf = [None for _ in range(len(possible_cf_paths))] # These values will not be used so they are set to None
-    csv_content_train = np.array([np.concatenate((["path"], possible_cf_paths), axis=0),
-                                  np.concatenate((["class"], y_cf), axis=0)]).T
-    with open(dataset_path, 'w') as f:
-        writer = csv.writer(f)
-        writer.writerows(csv_content_train)
-
-    # Verifying that the generated samples are actual counterfactuals according to the model
-    dataset = get_dataset_transformed(db_dir, model_dir, dataset_path)
-    _, _, y_pred_cf, _ = _predict(model_dir, device, dataset)
-    actual_cf_idx_list = []
-    for y_pred_cf_idx, y_pred_curr_cf in enumerate(y_pred_cf):
-        # Exclusive or to check that the values are different
-        if bool(y_pred) ^ bool(y_pred_curr_cf):
-            actual_cf_idx_list.append(y_pred_cf_idx)
-
-    # Computing output path depending on target class and prediction
-    curr_folder = os.path.join(xai_output_path, _get_subfolder(y_pred, y))
-
-    # Copying the actual original image into the XAI output directory
-    shutil.copyfile(og_img_path, os.path.join(curr_folder, str(sample_idx + 1) + ".png"))
-
-    # Generating counterfactual images for every actual counterfactual. Highlighting the cells where the counterfactual
-    # differs from the original image.
-    for actual_cf_idx in actual_cf_idx_list:
-        cf_dict = counterfactuals_dict_list[actual_cf_idx]
-        coords_diff = get_coords_diff(PatImgObj(img_entry), PatImgObj(cf_dict))
-        gen_img(os.path.join(curr_folder, str(sample_idx + 1) + "cf_" + str(actual_cf_idx) + ".png"),
-                cf_dict["content"], cf_dict["division"], cf_dict["size"], to_highlight=coords_diff)
-
-    # Removing the temporary dictionary
-    shutil.rmtree(temp_dir)
-
-
-def generate_counterfactuals_resnet18(db_dir, db, dataset_filename, model_dir, counterfactual_fun, nb_cf,
-                                      device="cuda:0", n_jobs=-1, dataset_size=None):
-    """
-    Generating counterfactual explanations for the given model and dataset.
-    :param db_dir: root of the database.
-    :param db: database content.
-    :param dataset_filename: filename of the dataset.
-    :param model_dir: path of the model directory.
-    :param counterfactual_fun : function generating possible counterfactual explanations for the specific rule of
-    the dataset based on the image entry, the class of the sample and the number of possible counterfactuals to generate.
-    Expected signature : fun(img_entry, y, nb_cf).
-    :param nb_cf : maximum number of counterfactual explanations to be generated for every sample. nb_cf possible
-    counterfactual will be generated, but only those which are actual counterfactuals according to the model will be
-    saved to the disk.
-    :param device: device to use for pytorch computation.
-    :param n_jobs: number of jobs to run in parallel.
-    :param dataset_size: elements of the dataset are loaded until the size reaches this value. If None, the whole
-    dataset is loaded.
-    :return: None.
-    """
-
-    # Creating directories
-    xai_output_path = os.path.join(model_dir, "xai_" + pathlib.Path(dataset_filename).stem + "_" + "cf")
-    _create_dirs(xai_output_path)
-
-    # Loading data
-    dataset = get_dataset_transformed(db_dir, model_dir, dataset_filename, max_size=dataset_size)
-
-    # Make prediction
-    X, y, y_pred, model = _predict(model_dir, device, dataset)
-
-    # Parallel computation of the images for the whole dataset.
-    print("Generating counterfactual images")
-    Parallel(n_jobs=n_jobs)(delayed(_cf_single_sample)(
-        db_dir, i, xai_output_path, counterfactual_fun, db[dataset.get_id(i)], y[i], y_pred[i], nb_cf, model_dir, device) for i in tqdm.tqdm(range(len(X))))
-
-
-
 def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_entry, y, y_pred, model_dir, device,
-                                      max_depth, nb_tries_per_depth, shapes, colors, empty_probability):
+                                      max_depth, nb_tries_per_depth, shapes, colors, empty_probability,
+                                      yes_pred_img_path, no_pred_img_path, pos_pred_legend_path=None,
+                                      neg_pred_legend_path=None):
     """
     Generating a set of counterfactual explanations for a single sample with the random approach.
     :param db_dir: path of the database.
@@ -433,15 +458,16 @@ def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_e
     :param shapes: list of possible shapes.
     :param colors: list of possible colors.
     :param empty_probability: probability of an empty cell.
+    :param yes_pred_img_path: path the image that represents the yes prediction.
+    :param no_pred_img_path: path the image that represents the no prediction.
+    :param pos_pred_legend_path: path the legend when the prediction is positive.
+    :param neg_pred_legend_path: path the legend when the prediction is negative.
     :return: None
     """
 
     cf_found = False
 
     for curr_depth in range(1, max_depth + 1):
-
-        if cf_found:
-            break
 
         counterfactuals_dict_list = []
 
@@ -489,21 +515,47 @@ def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_e
         # Copying the actual original image into the XAI output directory
         shutil.copyfile(og_img_path, os.path.join(curr_folder, str(sample_idx + 1) + ".png"))
 
-        # Generating counterfactual images for every actual counterfactual. Highlighting the cells where the counterfactual
-        # differs from the original image.
-        for actual_cf_idx in actual_cf_idx_list:
-            cf_dict = counterfactuals_dict_list[actual_cf_idx]
+        # Generating the output for the first counterfactual found, providing at least one was found
+        if cf_found:
+            cf_dict = counterfactuals_dict_list[actual_cf_idx_list[0]]
             coords_diff = get_coords_diff(PatImgObj(img_entry), PatImgObj(cf_dict))
-            gen_img(os.path.join(curr_folder, str(sample_idx + 1) + "cf_" + str(actual_cf_idx) + "depth_" + str(curr_depth) + ".png"),
-                    cf_dict["content"], cf_dict["division"], cf_dict["size"], to_highlight=coords_diff)
+            cf_img = gen_img(None, cf_dict["content"], cf_dict["division"], cf_dict["size"],
+                             to_highlight=coords_diff)
+
+            # Adding the legend to the explanation
+            if pos_pred_legend_path is not None and neg_pred_legend_path is not None:
+                legend_img = Image.open(pos_pred_legend_path) if y_pred == 1 else Image.open(neg_pred_legend_path)
+                cf_img = _vertical_concatenation(cf_img, legend_img)
+
+            # Saving the images to disk
+            output_img_path = os.path.join(curr_folder, str(sample_idx + 1) + "cf.png")
+            _generate_displayable_explanation(y_pred, cf_img, yes_pred_img_path, no_pred_img_path, output_img_path,
+                                              output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5)
+
+            output_img_AIonly_path = os.path.join(curr_folder, str(sample_idx + 1) + "AIonly.png")
+            _generate_displayable_explanation(y_pred, cf_img, yes_pred_img_path, no_pred_img_path,
+                                              output_img_AIonly_path,
+                                              output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5,
+                                              AI_only=True)
+
+            # Exporting the content of the JSON explanation
+            with open(os.path.join(xai_output_path, f"cf_{sample_idx + 1}.json"), 'w', encoding='utf-8') as f:
+                json.dump(cf_dict, f, ensure_ascii=False, indent=4)
+
+            # Returning the depth that was needed to obtain a counterfactual explanation
+            return curr_depth
 
         # Removing the temporary dictionary
         shutil.rmtree(temp_dir)
 
+    # In case no counterfactual was found at any depth, returning None
+    return None
 
-def generate_counterfactuals_resnet18_random_approach(db_dir, dataset_filename, model_dir, shapes, colors,
+def generate_counterfactuals_resnet18_random_approach(db_dir, dataset_filename, model_dir, yes_pred_img_path,
+                                                      no_pred_img_path, shapes, colors,
                                                       empty_probability, max_depth, nb_tries_per_depth,device="cuda:0",
-                                                      n_jobs=-1, dataset_size=None):
+                                                      n_jobs=-1, dataset_size=None, pos_pred_legend_path=None,
+                                                      neg_pred_legend_path=None):
     """
     Generating counterfactual explanations for the given model and dataset. Explanations are obtained by assessing
     randomly mutated images. A mutation consists in randomly changing the content of a cell of the image.
@@ -520,6 +572,8 @@ def generate_counterfactuals_resnet18_random_approach(db_dir, dataset_filename, 
     :param model_dir: path of the model directory.
     the dataset based on the image entry, the class of the sample and the number of possible counterfactuals to generate.
     Expected signature : fun(img_entry, y, nb_cf).
+    :param yes_pred_img_path: path the image that represents the yes prediction.
+    :param no_pred_img_path: path the image that represents the no prediction.
     :param device: device to use for pytorch computation.
     :param n_jobs: number of jobs to run in parallel.
     :param dataset_size: elements of the dataset are loaded until the size reaches this value. If None, the whole
@@ -529,6 +583,8 @@ def generate_counterfactuals_resnet18_random_approach(db_dir, dataset_filename, 
     :param shapes: list of possible shapes.
     :param colors: list of possible colors.
     :param empty_probability: probability of an empty cell.
+    :param pos_pred_legend_path: path the legend when the prediction is positive.
+    :param neg_pred_legend_path: path the legend when the prediction is negative.
     :return: None.
        """
 
@@ -547,8 +603,19 @@ def generate_counterfactuals_resnet18_random_approach(db_dir, dataset_filename, 
 
     # Parallel computation of the images for the whole dataset.
     print("Generating counterfactual images")
-    Parallel(n_jobs=n_jobs)(delayed(_cf_single_sample_random_approach)(
+    depths = Parallel(n_jobs=n_jobs)(delayed(_cf_single_sample_random_approach)(
         db_dir, i, xai_output_path, db[dataset.get_id(i)], y[i], y_pred[i], model_dir,
-        device, max_depth, nb_tries_per_depth, shapes, colors, empty_probability) for i in tqdm.tqdm(range(len(X))))
+        device, max_depth, nb_tries_per_depth, shapes, colors, empty_probability, yes_pred_img_path, no_pred_img_path,
+        pos_pred_legend_path, neg_pred_legend_path) for i in tqdm.tqdm(range(len(X))))
+
+    # Writing depths of generated counterfactuals
+    csv_data = [
+        {"CF_id": str(i), "depth": str(depths[i])} for i in range(len(X))
+    ]
+    with open(os.path.join(xai_output_path, "CF_generation.csv"), 'w', newline='') as csvfile:
+        fieldnames = ['CF_id', 'depth']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(csv_data)
 
 

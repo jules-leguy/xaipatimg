@@ -47,8 +47,8 @@ def random_mutation(img_dict, depth, shapes, colors, empty_probability):
     for _ in range(depth):
 
         # Random coordinate generation
-        pos_x = np.random.choice(np.arange(0, obj.division[0]))
-        pos_y = np.random.choice(np.arange(0, obj.division[1]))
+        pos_x = int(np.random.choice(np.arange(0, obj.division[0])))
+        pos_y = int(np.random.choice(np.arange(0, obj.division[1])))
 
         # Mutation
         if random.random() < empty_probability:
@@ -81,7 +81,7 @@ class PatImgObj:
         :param value: image content value
         :return: None
         """
-        value["pos"] = (posx, posy)
+        value["pos"] = [posx, posy]
         self.img_content_arr[posx][posy] = value
 
     def remove_symbol(self, posx, posy):
