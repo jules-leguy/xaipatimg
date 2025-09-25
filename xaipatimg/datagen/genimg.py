@@ -40,7 +40,7 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
     shapes in the picture.
     :param division: tuple that describes the number of horizontal and vertical divisions.
     :param dimension: tuple that describes the size of the image in pixels.
-    :param to_higlight: List of (x, y) positions to highlight in the image.
+    :param to_highlight: List of (x, y) positions to highlight in the image.
     :param overwrite: whether to overwrite existing images. If False, no action will be taken if the image already exists.
     :return: None
     """
@@ -166,7 +166,7 @@ def gen_img_and_save_db(db, db_dir, overwrite=False, n_jobs=1):
     Parallel(n_jobs=n_jobs)(delayed(gen_img)(os.path.join(db_dir, img_data_list[i]["path"]),
                                              img_data_list[i]["content"],
                                              img_data_list[i]["division"], img_data_list[i]["size"],
-                                             overwrite) for i in tqdm.tqdm(range(len(img_data_list))))
+                                             None, overwrite) for i in tqdm.tqdm(range(len(img_data_list))))
     # Parallel generation of the images
 
     save_db(db=db, db_dir=db_dir)
