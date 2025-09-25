@@ -32,7 +32,8 @@ def draw_triangle(draw, x, y, size, color):
     draw.polygon(points, fill=color, outline=color)
 
 
-def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlight=None, overwrite=False):
+def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlight=None, overwrite=False,
+            return_image=False):
     """
     Generate a grid label image, as well as highlighting a feature in the image. 
     :param img_path: path where to save the generated image.
@@ -42,16 +43,16 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
     :param dimension: tuple that describes the size of the image in pixels.
     :param to_highlight: List of (x, y) positions to highlight in the image.
     :param overwrite: whether to overwrite existing images. If False, no action will be taken if the image already exists.
+    :param return_image : whether to return the generated image
     :return: None
     """
-    
     to_highlight = set(to_highlight or [])
 
-    # Exit if the file already exists and overwrite is set to False
     if img_path is not None:
+        # Exit if the file already exists and overwrite is set to False
         already_exists = os.path.exists(img_path)
         if already_exists and not overwrite:
-            return
+            return None
 
         img_dir_path = os.path.dirname(img_path)
         os.makedirs(img_dir_path, exist_ok=True)
@@ -149,7 +150,11 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
     if img_path is not None:
         img.save(img_path)
 
-    return img
+    if return_image:
+        return img
+
+    return None
+
 
 def gen_img_and_save_db(db, db_dir, overwrite=False, n_jobs=1):
     """
@@ -163,10 +168,9 @@ def gen_img_and_save_db(db, db_dir, overwrite=False, n_jobs=1):
     """
     img_data_list = list(db.values())
 
+    # Parallel generation of the images
     Parallel(n_jobs=n_jobs)(delayed(gen_img)(os.path.join(db_dir, img_data_list[i]["path"]),
                                              img_data_list[i]["content"],
                                              img_data_list[i]["division"], img_data_list[i]["size"],
-                                             None, overwrite) for i in tqdm.tqdm(range(len(img_data_list))))
-    # Parallel generation of the images
-
+                                             None, overwrite, False) for i in tqdm.tqdm(range(len(img_data_list))))
     save_db(db=db, db_dir=db_dir)
