@@ -136,7 +136,7 @@ def _generate_displayable_explanation(model_pred, explanation_img, yes_pred_img_
     :param font_size: font size.
     :param padding: padding.
     :param AI_only: If True, only the model prediction will be displayed.
-    :return: 
+    :return:
     """
 
     total_width, total_height = output_size
@@ -437,9 +437,7 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, yes_pred_img_pat
     print("Generating shap images")
     Parallel(n_jobs=n_jobs)(delayed(_shap_single_sample)(
         i, shap_values.values[i: i + 1], img_numpy[i: i + 1],
-        xai_output_path, y_pred[i], y[i], (min_shap_value, max_shap_value), shap_scale_img_path, yes_pred_img_path,
-        no_pred_img_path) for i in tqdm.tqdm(range(len(X))))
-
+        xai_output_path, y_pred[i], y[i], (min_shap_value, max_shap_value), shap_scale_img_path) for i in tqdm.tqdm(range(len(X))))
 
 def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_entry, y, y_pred, model_dir, device,
                                       max_depth, nb_tries_per_depth, shapes, colors, empty_probability,
