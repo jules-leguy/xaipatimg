@@ -6,6 +6,9 @@ import shutil
 import os
 from sklearn.model_selection import train_test_split
 
+from xaipatimg.datagen.utils import PatImgObj
+
+
 def create_dataset_based_on_rule(db_dir, csv_filename_train, csv_filename_test, csv_filename_valid, test_size,
                                  valid_size, dataset_pos_samples_nb, dataset_neg_samples_nb, rule_fun, random_seed=42, **kwargs):
     """
@@ -124,24 +127,59 @@ def extract_sample_from_dataset(db_dir, csv_filename, output_dir_path, pos_sampl
                 shutil.copyfile(os.path.join(db_dir, row[0]), os.path.join(neg_dir_path, os.path.basename(row[0])))
                 neg_nb += 1
 
-def _extract_rows_with_only_shape(img_content, shape, y_division):
+def _extract_rows_with_only_shape_or_color(img_content, y_division, shape=None, color=None):
     """
-    Returns the row which only contain the given shape
+    Returns the rows which only contain the given shape or color
     :param img_content: content of the image.
     :param shape: shape to search for.
+    :param color: color to search for.
     :param y_division: number of y divisions in the image.
     :return:
     """
-    circles_counter = np.zeros(y_division,)
-    non_circles_counter = np.zeros(y_division,)
+    pattern_counter = np.zeros(y_division,)
+    non_pattern_counter = np.zeros(y_division,)
 
     for c in img_content:
-        if c["shape"] == shape:
-            circles_counter[c["pos"][1]] += 1
-        else:
-            non_circles_counter[c["pos"][1]] += 1
+        if shape is not None :
+            if c["shape"] == shape:
+                pattern_counter[c["pos"][1]] += 1
+                continue
 
-    return np.logical_and(circles_counter >= 1, non_circles_counter == 0)
+        if color is not None:
+            if c["color"] == color:
+                pattern_counter[c["pos"][1]] += 1
+                continue
+
+        non_pattern_counter[c["pos"][1]] += 1
+
+    return np.logical_and(pattern_counter >= 1, non_pattern_counter == 0)
+
+def _extract_cols_with_only_shape_or_color(img_content, x_division, shape=None, color=None):
+    """
+    Returns the col which only contain the given shape or color
+    :param img_content: content of the image.
+    :param shape: shape to search for.
+    :param color: color to search for.
+    :param x_division: number of x divisions in the image.
+    :return:
+    """
+    pattern_counter = np.zeros(x_division,)
+    non_pattern_counter = np.zeros(x_division,)
+
+    for c in img_content:
+        if shape is not None :
+            if c["shape"] == shape:
+                pattern_counter[c["pos"][0]] += 1
+                continue
+
+        if color is not None:
+            if c["color"] == color:
+                pattern_counter[c["pos"][0]] += 1
+                continue
+
+        non_pattern_counter[c["pos"][0]] += 1
+
+    return np.logical_and(pattern_counter >= 1, non_pattern_counter == 0)
 
 def generic_rule_exist_row_with_only_shape(img_content, shape, y_division):
     """
@@ -151,10 +189,43 @@ def generic_rule_exist_row_with_only_shape(img_content, shape, y_division):
     :param y_division: number of y divisions.
     :return:
     """
-    return np.sum(_extract_rows_with_only_shape(img_content, shape, y_division)) >= 1
+    return np.sum(_extract_rows_with_only_shape_or_color(img_content, y_division, shape=shape)) >= 1
 
+def generic_rule_exist_row_with_only_color(img_content, color, y_division):
+    """
+    Returns True iff there is at least one row in the given image that only contains the given color.
+    :param img_content: dictionary content of the image.
+    :param color: color to identify.
+    :param y_division: number of y divisions.
+    :return:
+    """
+    return np.sum(_extract_rows_with_only_shape_or_color(img_content, y_division, color=color)) >= 1
 
-def generic_rule_N_times_color_exactly(img_content, N, color):
+def generic_rule_exist_column_with_only_shape(img_content, shape, x_division):
+    """
+    Returns True iff there is at least one row in the given image that only contains the given shape.
+    :param img_content: dictionary content of the image.
+    :param shape: shape to identify.
+    :param x_division: number of y divisions.
+    :return:
+    """
+    return np.sum(_extract_cols_with_only_shape_or_color(img_content, x_division, shape=shape)) >= 1
+
+def generic_rule_exist_row_with_only_color_and_col_with_only_shape(img_content, color, shape, x_division, y_division):
+    """
+    Returns True iff there is at least one row in the given image that only contains the given color and at least
+    one column in the given image that only contains the given shape.
+    :param img_content: dictionary content of the image.
+    :param color: color to identify.
+    :param shape: shape to identify.
+    :param x_division: number of x divisions.
+    :param y_division: number of y divisions.
+    :return:
+    """
+    return generic_rule_exist_row_with_only_color(img_content, color, y_division) \
+        and generic_rule_exist_column_with_only_shape(img_content, shape, x_division)
+
+def generic_rule_N_times_color_exactly(img_content, N, color, x_division, y_division):
     """
     Returns True iff there is exactly N times the given color in the image.
     :param img_content: dictionary content of the image.
@@ -162,14 +233,24 @@ def generic_rule_N_times_color_exactly(img_content, N, color):
     :param color: color to count the instances of.
     :return:
     """
-    color_counter = 0
-    for c in img_content:
-        if c["color"] == color:
-            color_counter += 1
+    obj = PatImgObj({"content": img_content, "division": (x_division, y_division), "path": None, "size": None})
+    return len(obj.get_symbols_by(color=color)) == N
 
-    return color_counter == N
-
-
+def generic_rule_shape_color_plus_shape_equals_N(img_content, shape1, color1, shape2, N, x_division, y_division):
+    """
+    Return true iff the number of instances of the given color plus the number of instances of the given shape equals
+    the given N value.
+    :param img_content: dictionary content of the image.
+    :param shape1: shape of the first element to count.
+    :param color1: color of the first element to count.
+    :param shape2: shape of the second element to count.
+    :param N: integer value to compare the sum with.
+    :param x_division: number of x divisions.
+    :param y_division: number of y divisions.
+    :return:
+    """
+    obj = PatImgObj({"content": img_content, "division": (x_division, y_division), "path": None, "size": None})
+    return len(obj.get_symbols_by(shape=shape1, color=color1)) + len(obj.get_symbols_by(shape=shape2)) == N
 
 def create_dataset_generic_rule_extract_sample(db_dir, csv_name_train, csv_name_test, csv_name_valid,
                                                test_size, valid_size, dataset_pos_samples_nb, dataset_neg_samples_nb,
@@ -202,4 +283,3 @@ def create_dataset_generic_rule_extract_sample(db_dir, csv_name_train, csv_name_
 
     # Sample extraction
     extract_sample_from_dataset(db_dir, csv_name_train, sample_path, sample_nb_per_class, sample_nb_per_class)
-    # %%
