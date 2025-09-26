@@ -36,28 +36,6 @@ def _create_dirs(xai_output_path):
     :return:
     """
     os.makedirs(xai_output_path, exist_ok=True)
-    os.makedirs(os.path.join(xai_output_path, "TP"), exist_ok=True)
-    os.makedirs(os.path.join(xai_output_path, "TN"), exist_ok=True)
-    os.makedirs(os.path.join(xai_output_path, "FP"), exist_ok=True)
-    os.makedirs(os.path.join(xai_output_path, "FN"), exist_ok=True)
-
-
-def _get_subfolder(pred, true):
-    """
-    Getting the subfolder name depending on the prediction.
-    :param pred: predicted class.
-    :param true: true class.
-    :return: str that represents the subfolder name.
-    """
-    if true == 1 and pred == 1:
-        return "TP"
-    elif true == 0 and pred == 0:
-        return "TN"
-    elif true == 1 and pred == 0:
-        return "FN"
-    elif true == 0 and pred == 1:
-        return "FP"
-    return None
 
 def _predict(model_dir, device, dataset):
     """
@@ -275,19 +253,16 @@ def generate_cam_resnet18(cam_technique, db_dir, dataset_filename, model_dir, de
                 bgr_img = cv2.imread(paths_list[i], 1)
                 bgr_img = cv2.resize(bgr_img, (256, 256))
 
-                # Computing output path depending on target class and prediction
-                curr_folder = os.path.join(xai_output_path, _get_subfolder(y_pred[0], y[i]))
-
                 # Writing input image to filesystem
-                cv2.imwrite(os.path.join(curr_folder, str(i) + ".jpg"), bgr_img)
+                cv2.imwrite(os.path.join(xai_output_path, str(i) + ".jpg"), bgr_img)
 
                 # Writing cam merged on image to filesystem
                 bgr_img = np.float32(bgr_img) / 255
                 visualization = show_cam_on_image(bgr_img, grayscale_cam[0], use_rgb=False)
-                cv2.imwrite(os.path.join(curr_folder, str(i) + "_target_" + str(j) + ".jpg"), visualization)
+                cv2.imwrite(os.path.join(xai_output_path, str(i) + "_target_" + str(j) + ".jpg"), visualization)
 
 
-def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_pred, y, shap_values_lim,
+def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_pred, shap_values_lim,
                         shap_scale_img_path, yes_pred_img_path, no_pred_img_path):
     """
     Compute and saves shap explanations for single sample of index i.
@@ -296,7 +271,6 @@ def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_p
     :param img_numpy: current image as a numpy array for displaying in the plot
     :param xai_output_path: path where to save the results.
     :param y_pred: prediction of the model for the current sample.
-    :param y: label of the current sample.
     :param shap_scale_img_path : path to the image that represents the shap color scale and which will be added to the
     bottom of the generated explanation. Will be ignored if None.
     :param yes_pred_img_path: path to the image that represent a yes prediction
@@ -329,9 +303,6 @@ def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_p
     w, h = im.size
     w_step = w / 3
 
-    # Computing output path depending on target class and prediction
-    curr_folder = os.path.join(xai_output_path, _get_subfolder(y_pred, y))
-
     def process_img(img):
         return add_margin(crop_white_border(img),
                           20, 20, 20, 20, (255, 255, 255, 255)).resize((700, 700))
@@ -346,24 +317,25 @@ def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_p
         shap_expl_1 = _vertical_concatenation(shap_expl_1, scale_img)
 
     # Saving the images to disk
-    original_image.save(os.path.join(curr_folder, str(sample_idx + 1) + ".jpg"))
+    original_image.save(os.path.join(xai_output_path, str(sample_idx) + "_og.jpg"))
 
-    output_img_path = os.path.join(curr_folder, str(sample_idx + 1) + "shap.png")
+    output_img_path = os.path.join(xai_output_path, str(sample_idx) + ".png")
     _generate_displayable_explanation(y_pred, shap_expl_1, yes_pred_img_path, no_pred_img_path, output_img_path,
                                       output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5)
 
-    output_img_AIonly_path = os.path.join(curr_folder, str(sample_idx + 1) + "AIonly.png")
+    output_img_AIonly_path = os.path.join(xai_output_path, str(sample_idx) + "AIonly.png")
     _generate_displayable_explanation(y_pred, shap_expl_1, yes_pred_img_path, no_pred_img_path, output_img_AIonly_path,
                                       output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5, AI_only=True)
 
 
-def generate_shap_resnet18(db_dir, dataset_filename, model_dir, yes_pred_img_path, no_pred_img_path, device="cuda:0",
-                           n_jobs=-1, dataset_size=None, masker="blur(128,128)", shap_scale_img_path=None):
+def generate_shap_resnet18(db_dir, dataset_filename, model_dir, xai_output_path, yes_pred_img_path, no_pred_img_path,
+                           device="cuda:0", n_jobs=-1, dataset_size=None, masker="blur(128,128)", shap_scale_img_path=None):
     """
     Generating shap explanations for the given model and dataset, which are stored into the model directory.
     :param db_dir: root of the database.
     :param dataset_filename: filename of the dataset.
     :param model_dir: path of the model directory.
+    :param xai_output_path: path where to save the results.
     :param device: device to use for pytorch computation.
     :param n_jobs: number of jobs to run in parallel.
     :param dataset_size: elements of the dataset are loaded until the size reaches this value. If None, the whole
@@ -380,14 +352,13 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, yes_pred_img_pat
     """
 
     # Creating directories
-    xai_output_path = os.path.join(model_dir, "xai_" + pathlib.Path(dataset_filename).stem + "_" + "shap_" + str(masker))
     _create_dirs(xai_output_path)
 
     # Loading data
     dataset = get_dataset_transformed(db_dir, model_dir, dataset_filename, max_size=dataset_size)
 
     # Make prediction
-    X, y, y_pred, model = _predict(model_dir, device, dataset)
+    X, _, y_pred, model = _predict(model_dir, device, dataset)
 
     Xtr = nchw_to_nhwc(torch.from_numpy(X))
 
@@ -417,16 +388,8 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, yes_pred_img_pat
         return output
 
     # Computing shap values for the whole dataset
-    explainer = shap.Explainer(predict, masker=masker_f, output_names=["0", "1"])
-    shap_values_list = []
     print("Computing shap values")
-    # min_shap_value = float("inf")
-    # max_shap_value = float("-inf")
-    # for i in tqdm.tqdm(range(len(X))):
-    #     shap_values_curr_sample = explainer(
-    #         Xtr[i:i + 1], max_evals=200, batch_size=50
-    #     )
-
+    explainer = shap.Explainer(predict, masker=masker_f, output_names=["0", "1"])
     shap_values = explainer(
         Xtr, max_evals=10000, batch_size=50
     )
@@ -436,10 +399,11 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, yes_pred_img_pat
     # Parallel computation of the images for the whole dataset.
     print("Generating shap images")
     Parallel(n_jobs=n_jobs)(delayed(_shap_single_sample)(
-        i, shap_values.values[i: i + 1], img_numpy[i: i + 1],
-        xai_output_path, y_pred[i], y[i], (min_shap_value, max_shap_value), shap_scale_img_path) for i in tqdm.tqdm(range(len(X))))
+        i, shap_values.values[i: i + 1], img_numpy[i: i + 1], xai_output_path, y_pred[i],
+        (min_shap_value, max_shap_value), shap_scale_img_path,
+        yes_pred_img_path, no_pred_img_path) for i in tqdm.tqdm(range(len(X))))
 
-def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_entry, y, y_pred, model_dir, device,
+def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_entry, y_pred, model_dir, device,
                                       max_depth, nb_tries_per_depth, shapes, colors, empty_probability,
                                       yes_pred_img_path, no_pred_img_path, pos_pred_legend_path=None,
                                       neg_pred_legend_path=None):
@@ -449,7 +413,6 @@ def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_e
     :param sample_idx: index of the sample.
     :param xai_output_path: path where to save the xai explanations.
     :param img_entry: entry of the image in the database.
-    :param y: class of the sample.
     :param y_pred: predicted class of the sample.
     :param model_dir: path of the model directory.
     :param device: device to use for pytorch computation.
@@ -509,18 +472,15 @@ def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_e
                 cf_found = True
                 break
 
-        # Computing output path depending on target class and prediction
-        curr_folder = os.path.join(xai_output_path, _get_subfolder(y_pred, y))
-
         # Copying the actual original image into the XAI output directory
-        shutil.copyfile(og_img_path, os.path.join(curr_folder, str(sample_idx + 1) + ".png"))
+        shutil.copyfile(og_img_path, os.path.join(xai_output_path, str(sample_idx) + "_og.png"))
 
         # Generating the output for the first counterfactual found, providing at least one was found
         if cf_found:
             cf_dict = counterfactuals_dict_list[actual_cf_idx_list[0]]
             coords_diff = get_coords_diff(PatImgObj(img_entry), PatImgObj(cf_dict))
             cf_img = gen_img(None, cf_dict["content"], cf_dict["division"], cf_dict["size"],
-                             to_highlight=coords_diff)
+                             to_highlight=coords_diff, return_image=True)
 
             # Adding the legend to the explanation
             if pos_pred_legend_path is not None and neg_pred_legend_path is not None:
@@ -528,18 +488,18 @@ def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_e
                 cf_img = _vertical_concatenation(cf_img, legend_img)
 
             # Saving the images to disk
-            output_img_path = os.path.join(curr_folder, str(sample_idx + 1) + "cf.png")
+            output_img_path = os.path.join(xai_output_path, str(sample_idx) + ".png")
             _generate_displayable_explanation(y_pred, cf_img, yes_pred_img_path, no_pred_img_path, output_img_path,
                                               output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5)
 
-            output_img_AIonly_path = os.path.join(curr_folder, str(sample_idx + 1) + "AIonly.png")
+            output_img_AIonly_path = os.path.join(xai_output_path, str(sample_idx) + "AIonly.png")
             _generate_displayable_explanation(y_pred, cf_img, yes_pred_img_path, no_pred_img_path,
                                               output_img_AIonly_path,
                                               output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5,
                                               AI_only=True)
 
             # Exporting the content of the JSON explanation
-            with open(os.path.join(xai_output_path, f"cf_{sample_idx + 1}.json"), 'w', encoding='utf-8') as f:
+            with open(os.path.join(xai_output_path, f"cf_{sample_idx}.json"), 'w', encoding='utf-8') as f:
                 json.dump(cf_dict, f, ensure_ascii=False, indent=4)
 
             # Returning the depth that was needed to obtain a counterfactual explanation
@@ -551,9 +511,9 @@ def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_e
     # In case no counterfactual was found at any depth, returning None
     return None
 
-def generate_counterfactuals_resnet18_random_approach(db_dir, dataset_filename, model_dir, yes_pred_img_path,
-                                                      no_pred_img_path, shapes, colors,
-                                                      empty_probability, max_depth, nb_tries_per_depth,device="cuda:0",
+def generate_counterfactuals_resnet18_random_approach(db_dir, dataset_filename, model_dir, xai_output_path,
+                                                      yes_pred_img_path, no_pred_img_path, shapes, colors,
+                                                      empty_probability, max_depth, nb_tries_per_depth, devices,
                                                       n_jobs=-1, dataset_size=None, pos_pred_legend_path=None,
                                                       neg_pred_legend_path=None):
     """
@@ -570,11 +530,10 @@ def generate_counterfactuals_resnet18_random_approach(db_dir, dataset_filename, 
     :param db_dir: root of the database.
     :param dataset_filename: filename of the dataset.
     :param model_dir: path of the model directory.
-    the dataset based on the image entry, the class of the sample and the number of possible counterfactuals to generate.
-    Expected signature : fun(img_entry, y, nb_cf).
+    :param xai_output_path: path where to save the results.
     :param yes_pred_img_path: path the image that represents the yes prediction.
     :param no_pred_img_path: path the image that represents the no prediction.
-    :param device: device to use for pytorch computation.
+    :param devices: List of devices to use for pytorch computation. Jobs are distributed to all devices.
     :param n_jobs: number of jobs to run in parallel.
     :param dataset_size: elements of the dataset are loaded until the size reaches this value. If None, the whole
     dataset is loaded.
@@ -589,14 +548,13 @@ def generate_counterfactuals_resnet18_random_approach(db_dir, dataset_filename, 
        """
 
     # Creating directories
-    xai_output_path = os.path.join(model_dir, "xai_" + pathlib.Path(dataset_filename).stem + "_random_" + "cf")
     _create_dirs(xai_output_path)
 
     # Loading data
     dataset = get_dataset_transformed(db_dir, model_dir, dataset_filename, max_size=dataset_size)
 
     # Make prediction
-    X, y, y_pred, model = _predict(model_dir, device, dataset)
+    X, _, y_pred, model = _predict(model_dir, devices[0], dataset)
 
     # Load database
     db = load_db(db_dir)
@@ -604,9 +562,9 @@ def generate_counterfactuals_resnet18_random_approach(db_dir, dataset_filename, 
     # Parallel computation of the images for the whole dataset.
     print("Generating counterfactual images")
     depths = Parallel(n_jobs=n_jobs)(delayed(_cf_single_sample_random_approach)(
-        db_dir, i, xai_output_path, db[dataset.get_id(i)], y[i], y_pred[i], model_dir,
-        device, max_depth, nb_tries_per_depth, shapes, colors, empty_probability, yes_pred_img_path, no_pred_img_path,
-        pos_pred_legend_path, neg_pred_legend_path) for i in tqdm.tqdm(range(len(X))))
+        db_dir, i, xai_output_path, db[dataset.get_id(i)], y_pred[i], model_dir,
+        devices[i%len(devices)], max_depth, nb_tries_per_depth, shapes, colors, empty_probability, yes_pred_img_path,
+        no_pred_img_path, pos_pred_legend_path, neg_pred_legend_path) for i in tqdm.tqdm(range(len(X))))
 
     # Writing depths of generated counterfactuals
     csv_data = [
@@ -619,3 +577,40 @@ def generate_counterfactuals_resnet18_random_approach(db_dir, dataset_filename, 
         writer.writerows(csv_data)
 
 
+def create_xai_index(db_dir, dataset_filename, model_dir, xai_dirs, dataset_size, device):
+    """
+    Creating a csv file which contains the information of (dataset index, class, model prediction, path to image, [path to every xai generated image],
+    path to the generated image for the prediction only).
+    :param db_dir: root of the database.
+    :param dataset_filename: filename of the dataset.
+    :param model_dir: path of the model directory.
+    :param xai_dirs: dictionary that contains for every explanation type, the path to where the explanations are saved.
+    :param dataset_size: elements of the dataset are loaded until the size reaches this value. If None, the whole
+    dataset is loaded.
+    :param device: device to use for pytorch computation.
+    :return:
+    """
+
+    # Loading data
+    dataset = get_dataset_transformed(db_dir, model_dir, dataset_filename, max_size=dataset_size)
+
+    # Make prediction
+    X, y, y_pred, model = _predict(model_dir, device, dataset)
+
+    csv_data = []
+
+    for idx in range(len(dataset)):
+        curr_line = {"idx": idx, "y": y[idx], "y_pred": y_pred[idx], "path": dataset.get_path(idx)}
+
+        for xai_key, xai_dir in xai_dirs.items():
+            curr_line[xai_key] = os.path.join(xai_dir, f"{idx}.png")
+            curr_line["AI"] = os.path.join(xai_dir, f"{idx}_AIonly.png")
+
+        csv_data.append(curr_line)
+
+    with open(os.path.join(model_dir, "xai_index.csv"), 'w', newline='') as csvfile:
+        fieldnames = ["idx", "y", "y_pred", "path", "AI"]
+        fieldnames.extend([k for k in xai_dirs.keys()])
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(csv_data)

@@ -356,7 +356,6 @@ def _compute_scores(data_loader, model, device):
         }
     }
 
-
 def load_resnet18_based_model(model_dir, device):
     """
     Creating a resnet18 model with two output features and loading the weights from the model stored in the given

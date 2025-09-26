@@ -7,7 +7,7 @@ import os
 from sklearn.model_selection import train_test_split
 
 def create_dataset_based_on_rule(db_dir, csv_filename_train, csv_filename_test, csv_filename_valid, test_size,
-                                 valid_size, dataset_pos_samples_nb, dataset_neg_samples_nb, rule_fun, random_seed=42):
+                                 valid_size, dataset_pos_samples_nb, dataset_neg_samples_nb, rule_fun, random_seed=42, **kwargs):
     """
     Function that creates a training dataset based on the rule that is defined in the rule_fun function. The dataset is
     saved as a csv file and contains a given number of positive and negative samples.
@@ -37,7 +37,7 @@ def create_dataset_based_on_rule(db_dir, csv_filename_train, csv_filename_test, 
 
     # Extracting positive and negative samples
     for img_content in tqdm.tqdm(img_content_list):
-        is_positive = rule_fun(img_content["content"])
+        is_positive = rule_fun(img_content["content"], **kwargs)
         if is_positive:
             if pos_nb < dataset_pos_samples_nb:
                 pos_list.append(img_content["path"])
@@ -123,3 +123,83 @@ def extract_sample_from_dataset(db_dir, csv_filename, output_dir_path, pos_sampl
             elif row[1] == "0" and neg_nb < neg_samples_nb:
                 shutil.copyfile(os.path.join(db_dir, row[0]), os.path.join(neg_dir_path, os.path.basename(row[0])))
                 neg_nb += 1
+
+def _extract_rows_with_only_shape(img_content, shape, y_division):
+    """
+    Returns the row which only contain the given shape
+    :param img_content: content of the image.
+    :param shape: shape to search for.
+    :param y_division: number of y divisions in the image.
+    :return:
+    """
+    circles_counter = np.zeros(y_division,)
+    non_circles_counter = np.zeros(y_division,)
+
+    for c in img_content:
+        if c["shape"] == shape:
+            circles_counter[c["pos"][1]] += 1
+        else:
+            non_circles_counter[c["pos"][1]] += 1
+
+    return np.logical_and(circles_counter >= 1, non_circles_counter == 0)
+
+def generic_rule_exist_row_with_only_shape(img_content, shape, y_division):
+    """
+    Returns True iff there is at least one row in the given image that only contains the given shape.
+    :param img_content: dictionary content of the image.
+    :param shape: shape to identify.
+    :param y_division: number of y divisions.
+    :return:
+    """
+    return np.sum(_extract_rows_with_only_shape(img_content, shape, y_division)) >= 1
+
+
+def generic_rule_N_times_color_exactly(img_content, N, color):
+    """
+    Returns True iff there is exactly N times the given color in the image.
+    :param img_content: dictionary content of the image.
+    :param N: number of instances of the given color to search for.
+    :param color: color to count the instances of.
+    :return:
+    """
+    color_counter = 0
+    for c in img_content:
+        if c["color"] == color:
+            color_counter += 1
+
+    return color_counter == N
+
+
+
+def create_dataset_generic_rule_extract_sample(db_dir, csv_name_train, csv_name_test, csv_name_valid,
+                                               test_size, valid_size, dataset_pos_samples_nb, dataset_neg_samples_nb,
+                                               sample_path, sample_nb_per_class, generic_rule_fun, **kwargs):
+    """
+    Creating a dataset with the given characteristics and following the given generic rule, and extracting a sample
+    of positive and negative instances.
+
+    :param db_dir: path to the root directory of the database.
+    :param csv_name_train: path to the csv file indexing training dataset.
+    :param csv_name_test: path to the csv file indexing test dataset.
+    :param csv_name_valid: path to the csv file indexing validation dataset.
+    :param test_size: size of the test dataset.
+    :param valid_size: size of the validation dataset.
+    :param dataset_pos_samples_nb: number of positive samples in the full dataset.
+    :param dataset_neg_samples_nb: number of negative samples in the full dataset.
+    :param sample_path: directory where to save the sample of the dataset.
+    :param sample_nb_per_class: size of the sample for each class.
+    :param generic_rule_fun: generic rule function that is used to generate the dataset.
+    :param kwargs: kwargs to give to the generic rule function.
+    :return:
+    """
+
+    # Dataset generation
+    create_dataset_based_on_rule(db_dir, csv_name_train, csv_name_test, csv_name_valid,
+                                 test_size=test_size, valid_size=valid_size,
+                                 dataset_pos_samples_nb=dataset_pos_samples_nb,
+                                 dataset_neg_samples_nb=dataset_neg_samples_nb,
+                                 rule_fun=generic_rule_fun, **kwargs)
+
+    # Sample extraction
+    extract_sample_from_dataset(db_dir, csv_name_train, sample_path, sample_nb_per_class, sample_nb_per_class)
+    # %%
