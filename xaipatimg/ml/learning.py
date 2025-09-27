@@ -367,7 +367,7 @@ def load_resnet18_based_model(model_dir, device):
     model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=False)
     model.fc = Linear(in_features=512, out_features=2, bias=True)
 
-    model.load_state_dict(torch.load(os.path.join(model_dir, "final_model"), weights_only=True))
+    model.load_state_dict(torch.load(os.path.join(model_dir, "final_model"), weights_only=True, map_location=device))
     model.eval()
     return model.to(device)
 
