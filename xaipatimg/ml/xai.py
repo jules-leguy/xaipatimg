@@ -499,7 +499,7 @@ def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_e
                                               AI_only=True)
 
             # Exporting the content of the JSON explanation
-            with open(os.path.join(xai_output_path, f"cf_{sample_idx}.json"), 'w', encoding='utf-8') as f:
+            with open(os.path.join(xai_output_path, f"{sample_idx}.json"), 'w', encoding='utf-8') as f:
                 json.dump(cf_dict, f, ensure_ascii=False, indent=4)
 
             # Returning the depth that was needed to obtain a counterfactual explanation
