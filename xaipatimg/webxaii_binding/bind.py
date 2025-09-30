@@ -6,17 +6,18 @@ import shutil
 import numpy as np
 from sklearn.model_selection import train_test_split
 
-
-def _create_task_q_json(res_dir, name, question):
+def _create_task_desc_json(res_dir, name, question):
     """
-    Creating the JSON file that contains the question.
+    Creating the JSON file that describes the task (question and examples).
     :param res_dir: resources directory.
     :param name: name of the task.
     :param question: text question.
     :return:
     """
     json_data = {
-        'question': question,
+        "question": question,
+        "pos_example": f"input/{name}/pos_example.png",
+        "neg_example": f"input/{name}/neg_example.png",
     }
     with open(os.path.join(res_dir, "tasks", name + ".json"), 'w') as f:
         json.dump(json_data, f)
@@ -54,7 +55,8 @@ def _create_content_csv(res_dir, idx_selected, y, y_pred, name, XAI_col_path_dic
         writer.writerows(csv_data)
 
 
-def _copy_images(db, model_dir, res_dir, name, idx_selected, img_paths, AI_paths, XAI_col_path_dict):
+def _copy_images(db, model_dir, res_dir, name, idx_selected, img_paths, AI_paths, XAI_col_path_dict, pos_example_path,
+                 neg_example_path):
     """
     Copy all images for the given task (source images, AI only images, XAI images) from the database and model folders
     to the resources directory.
@@ -76,6 +78,7 @@ def _copy_images(db, model_dir, res_dir, name, idx_selected, img_paths, AI_paths
         os.makedirs(os.path.join(res_dir, "xai_" + XAI_key), exist_ok=True)
         os.makedirs(os.path.join(res_dir, "xai_" + XAI_key, name), exist_ok=True)
 
+    # Copying images for all selected samples
     for idx in range(len(idx_selected)):
         shutil.copyfile(os.path.join(db, img_paths[idx]),
                         os.path.join(img_dir, str(idx_selected[idx]) + ".png"))
@@ -86,8 +89,13 @@ def _copy_images(db, model_dir, res_dir, name, idx_selected, img_paths, AI_paths
             shutil.copyfile(os.path.join(model_dir, name, XAI_paths[idx]),
                             os.path.join(res_dir, "xai_" + XAI_key, name, str(idx_selected[idx]) + ".png"))
 
+    # Copying images for examples
+    shutil.copyfile(os.path.join(db, pos_example_path), os.path.join(img_dir, "pos_example.png"))
+    shutil.copyfile(os.path.join(db, neg_example_path), os.path.join(img_dir, "neg_example.png"))
 
-def _create_res_task(db_dir, model_dir, res_dir, name, question, idx_selected, y, y_pred, img_paths, AI_paths, XAI_col_path_dict):
+
+def _create_res_task(db_dir, model_dir, res_dir, name, question, pos_example_path, neg_example_path, idx_selected, y,
+                     y_pred, img_paths, AI_paths, XAI_col_path_dict):
     """
     Create and import all the resources for the given task.
     :param db_dir: database directory.
@@ -95,6 +103,8 @@ def _create_res_task(db_dir, model_dir, res_dir, name, question, idx_selected, y
     :param res_dir: resources directory.
     :param name: name of the task.
     :param question: question text for the given task.
+    :param pos_example_path : path to a positive example of image for the given task.
+    :param neg_example_path : path to a negative example of image for the given task.
     :param idx_selected: indices of the samples selected.
     :param y: vector of labels of the samples selected.
     :param y_pred: vector of predicted labels of the samples selected.
@@ -104,9 +114,32 @@ def _create_res_task(db_dir, model_dir, res_dir, name, question, idx_selected, y
     :return:
     """
     _create_content_csv(res_dir, idx_selected, y, y_pred, name, XAI_col_path_dict)
-    _create_task_q_json(res_dir, name, question)
-    _copy_images(db_dir, model_dir, res_dir, name, idx_selected, img_paths, AI_paths, XAI_col_path_dict)
+    _create_task_desc_json(res_dir, name, question)
+    _copy_images(db_dir, model_dir, res_dir, name, idx_selected, img_paths, AI_paths, XAI_col_path_dict,
+                 pos_example_path, neg_example_path)
 
+def _select_examples(data_d, idx_to_consider):
+    """
+    Selecting examples from the dataset.
+    :param data_d: data dictionary.
+    :param idx_to_consider: indices that are considered to search for examples.
+    :return: pos_example_path (path to a positive example), neg_example_path (path to a negative example).
+    """
+
+    pos_example_path = None
+    neg_example_path = None
+
+    for idx in idx_to_consider:
+        if data_d["y"][idx] == 1:
+            pos_example_path = data_d["path"][idx]
+            break
+
+    for idx in idx_to_consider:
+        if data_d["y"][idx] == 0:
+            neg_example_path = data_d["path"][idx]
+            break
+
+    return pos_example_path, neg_example_path
 
 def generate_resources_dir(db_dir, interface_dir, model_dir, models_names_list, tasks_q_list, XAI_names_list, sample_size=10, random_seed=42):
     """
@@ -148,14 +181,19 @@ def generate_resources_dir(db_dir, interface_dir, model_dir, models_names_list, 
             for fieldname in fieldnames:
                 data_d[fieldname] = np.array(data_d[fieldname])
 
-            _, idx_selected = train_test_split(data_d["idx"], test_size=sample_size, random_state=random_seed,
-                                               stratify=data_d["y"] == data_d["y_pred"])
+            # Randomly sampling a set of instances
+            idx_not_selected, idx_selected = train_test_split(data_d["idx"], test_size=sample_size,
+                                                              random_state=random_seed,
+                                                              stratify=data_d["y"] == data_d["y_pred"])
+
+            # Extracting a positive example and a negative example (which are not part of the sampled data)
+            pos_example_path, neg_example_path = _select_examples(data_d, idx_not_selected)
 
             XAI_col_path_dict = {name: data_d[name][idx_selected] for name in XAI_names_list}
 
-            _create_res_task(db_dir, model_dir, res_dir, model_name, tasks_q_list[i], idx_selected,
-                             data_d["y"][idx_selected], data_d["y_pred"][idx_selected], data_d["path"][idx_selected],
-                             data_d["AI"][idx_selected], XAI_col_path_dict)
+            _create_res_task(db_dir, model_dir, res_dir, model_name, tasks_q_list[i], pos_example_path,
+                             neg_example_path, idx_selected,data_d["y"][idx_selected], data_d["y_pred"][idx_selected],
+                             data_d["path"][idx_selected], data_d["AI"][idx_selected], XAI_col_path_dict)
 
 
 
