@@ -16,8 +16,8 @@ def _create_task_desc_json(res_dir, name, question):
     """
     json_data = {
         "question": question,
-        "pos_example": f"input/{name}/pos_example.png",
-        "neg_example": f"input/{name}/neg_example.png",
+        "pos_example": f"assets/res/input/{name}/pos_example.png",
+        "neg_example": f"assets/res/input/{name}/neg_example.png",
     }
     with open(os.path.join(res_dir, "tasks", name + ".json"), 'w') as f:
         json.dump(json_data, f)
