@@ -79,6 +79,14 @@ class PatImgDataset(torch.utils.data.Dataset):
         """
         return os.path.join(self.db_dir, self.img_list[idx])
 
+    def get_image_name(self, idx):
+        """
+        Returns the name of the image for a given index in the dataset.
+        :param idx: index
+        :return: name of the image
+        """
+        return self.img_list[idx]
+
     def get_id(self, idx):
         """
         Returns the id of the image in the json database for a given index in the dataset.

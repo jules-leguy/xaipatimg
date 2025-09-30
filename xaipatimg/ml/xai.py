@@ -600,16 +600,16 @@ def create_xai_index(db_dir, dataset_filename, model_dir, xai_dirs, dataset_size
     csv_data = []
 
     for idx in range(len(dataset)):
-        curr_line = {"idx": idx, "y": y[idx], "y_pred": y_pred[idx], "path": dataset.get_path(idx)}
+        curr_line = {"idx": idx, "y": y[idx], "y_pred": y_pred[idx], "img": dataset.get_image_name(idx)}
 
         for xai_key, xai_dir in xai_dirs.items():
             curr_line[xai_key] = os.path.join(xai_dir, f"{idx}.png")
-            curr_line["AI"] = os.path.join(xai_dir, f"{idx}_AIonly.png")
+            curr_line["AI"] = os.path.join(xai_dir, f"{idx}AIonly.png")
 
         csv_data.append(curr_line)
 
     with open(os.path.join(model_dir, "xai_index.csv"), 'w', newline='') as csvfile:
-        fieldnames = ["idx", "y", "y_pred", "path", "AI"]
+        fieldnames = ["idx", "y", "y_pred", "img", "AI"]
         fieldnames.extend([k for k in xai_dirs.keys()])
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
