@@ -252,6 +252,16 @@ def generic_rule_shape_color_plus_shape_equals_N(img_content, shape1, color1, sh
     obj = PatImgObj({"content": img_content, "division": (x_division, y_division), "path": None, "size": None})
     return len(obj.get_symbols_by(shape=shape1, color=color1)) + len(obj.get_symbols_by(shape=shape2)) == N
 
+def generic_rule_shape_in_every_row(img_content, shape, y_division):
+    """
+    Return True iff there is the given shape in every row of the image.
+    :param img_content: dictionary content of the image.
+    :param shape: shape to identify.
+    :param y_division: number of y divisions.
+    :return:
+    """
+    return np.all(_extract_rows_with_only_shape_or_color(img_content, y_division, shape=shape))
+
 def create_dataset_generic_rule_extract_sample(db_dir, csv_name_train, csv_name_test, csv_name_valid,
                                                test_size, valid_size, dataset_pos_samples_nb, dataset_neg_samples_nb,
                                                sample_path, sample_nb_per_class, generic_rule_fun, **kwargs):
