@@ -8,6 +8,13 @@ from sklearn.model_selection import train_test_split
 
 
 def _create_task_q_json(res_dir, name, question):
+    """
+    Creating the JSON file that contains the question.
+    :param res_dir: resources directory.
+    :param name: name of the task.
+    :param question: text question.
+    :return:
+    """
     json_data = {
         'question': question,
     }
@@ -16,13 +23,13 @@ def _create_task_q_json(res_dir, name, question):
 
 def _create_content_csv(res_dir, idx_selected, y, y_pred, name, XAI_col_path_dict):
     """
-    Creating the content csv file in the tasks folder.
-    :param res_dir:
-    :param y:
-    :param y_pred:
-    :param name:
-    :param data_headers:
-    :param data:
+    Creating the content.csv file that contains the y, y_pred values as well as paths to images for the given task.
+    :param res_dir: resources directory.
+    :param idx_selected: vector of indices of the samples selected.
+    :param y: vector of labels of the samples selected.
+    :param y_pred: vector of predicted labels of the samples selected.
+    :param name: name of the task.
+    :param XAI_col_path_dict: dictionary that maps the names of XAI techniques to the vector of paths.
     :return:
     """
     csv_data = []
@@ -48,7 +55,19 @@ def _create_content_csv(res_dir, idx_selected, y, y_pred, name, XAI_col_path_dic
 
 
 def _copy_images(db, model_dir, res_dir, name, idx_selected, img_paths, AI_paths, XAI_col_path_dict):
-
+    """
+    Copy all images for the given task (source images, AI only images, XAI images) from the database and model folders
+    to the resources directory.
+    :param db: database directory.
+    :param model_dir: model directory.
+    :param res_dir: resources directory.
+    :param name: name of the task.
+    :param idx_selected: vector of indices of the samples selected.
+    :param img_paths: list of paths to source images.
+    :param AI_paths: list of paths to AI only images.
+    :param XAI_col_path_dict: dictionary that maps the names of XAI techniques to the vector of paths.
+    :return:
+    """
     img_dir = os.path.join(res_dir, "input", name)
     AI_dir = os.path.join(res_dir, "AI", name)
     os.makedirs(img_dir, exist_ok = True)
@@ -69,7 +88,21 @@ def _copy_images(db, model_dir, res_dir, name, idx_selected, img_paths, AI_paths
 
 
 def _create_res_task(db_dir, model_dir, res_dir, name, question, idx_selected, y, y_pred, img_paths, AI_paths, XAI_col_path_dict):
-
+    """
+    Create and import all the resources for the given task.
+    :param db_dir: database directory.
+    :param model_dir: model directory.
+    :param res_dir: resources directory.
+    :param name: name of the task.
+    :param question: question text for the given task.
+    :param idx_selected: indices of the samples selected.
+    :param y: vector of labels of the samples selected.
+    :param y_pred: vector of predicted labels of the samples selected.
+    :param img_paths: list of paths to source images.
+    :param AI_paths: list of paths to AI only images.
+    :param XAI_col_path_dict: dictionary that maps the names of XAI techniques to the vector of paths.
+    :return:
+    """
     _create_content_csv(res_dir, idx_selected, y, y_pred, name, XAI_col_path_dict)
     _create_task_q_json(res_dir, name, question)
     _copy_images(db_dir, model_dir, res_dir, name, idx_selected, img_paths, AI_paths, XAI_col_path_dict)
