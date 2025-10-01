@@ -134,7 +134,8 @@ def _extract_rows_with_only_shape_or_color(img_content, y_division, shape=None, 
     :param shape: shape to search for.
     :param color: color to search for.
     :param y_division: number of y divisions in the image.
-    :return:
+    :return: The rows which only contain the given shape or color, the count of symbols matching the pattern for every
+    row, the count of symbols not matching the pattern for every row.
     """
     pattern_counter = np.zeros(y_division,)
     non_pattern_counter = np.zeros(y_division,)
@@ -152,7 +153,7 @@ def _extract_rows_with_only_shape_or_color(img_content, y_division, shape=None, 
 
         non_pattern_counter[c["pos"][1]] += 1
 
-    return np.logical_and(pattern_counter >= 1, non_pattern_counter == 0)
+    return np.logical_and(pattern_counter >= 1, non_pattern_counter == 0), pattern_counter, non_pattern_counter
 
 def _extract_cols_with_only_shape_or_color(img_content, x_division, shape=None, color=None):
     """
@@ -189,7 +190,8 @@ def generic_rule_exist_row_with_only_shape(img_content, shape, y_division):
     :param y_division: number of y divisions.
     :return:
     """
-    return np.sum(_extract_rows_with_only_shape_or_color(img_content, y_division, shape=shape)) >= 1
+    match, _, _ = _extract_rows_with_only_shape_or_color(img_content, y_division, shape=shape)
+    return np.sum(match) >= 1
 
 def generic_rule_exist_row_with_only_color(img_content, color, y_division):
     """
@@ -199,7 +201,8 @@ def generic_rule_exist_row_with_only_color(img_content, color, y_division):
     :param y_division: number of y divisions.
     :return:
     """
-    return np.sum(_extract_rows_with_only_shape_or_color(img_content, y_division, color=color)) >= 1
+    match, _, _ = _extract_rows_with_only_shape_or_color(img_content, y_division, color=color)
+    return np.sum(match) >= 1
 
 def generic_rule_exist_column_with_only_shape(img_content, shape, x_division):
     """
@@ -260,7 +263,8 @@ def generic_rule_shape_in_every_row(img_content, shape, y_division):
     :param y_division: number of y divisions.
     :return:
     """
-    return np.all(_extract_rows_with_only_shape_or_color(img_content, y_division, shape=shape))
+    _, pattern_count, _ = _extract_rows_with_only_shape_or_color(img_content, y_division, shape=shape)
+    return np.all(pattern_count)
 
 def create_dataset_generic_rule_extract_sample(db_dir, csv_name_train, csv_name_test, csv_name_valid,
                                                test_size, valid_size, dataset_pos_samples_nb, dataset_neg_samples_nb,
