@@ -141,7 +141,8 @@ def _select_examples(data_d, idx_to_consider):
 
     return pos_example_path, neg_example_path
 
-def generate_resources_dir(db_dir, interface_dir, model_dir, models_names_list, tasks_q_list, XAI_names_list, sample_size=10, random_seed=42):
+def generate_resources_dir(db_dir, interface_dir, model_dir, models_names_list, tasks_q_list, XAI_names_list,
+                           target_accuracy_list, samples_interface_list, random_seed=42):
     """
     Generating the resources directory which is used in the experimental interface (WebXAII).
 
@@ -151,6 +152,8 @@ def generate_resources_dir(db_dir, interface_dir, model_dir, models_names_list, 
     :param models_names_list: list of model names.
     :param tasks_q_list: list of task questions.
     :param XAI_names_list: list of XAI techniques as saved in the models folders.
+    :param target_accuracy_list: list of target accuracy that was used when training the models.
+    :param samples_interface_list: list of samples to generate for the interface for each model.
     :param random_seed: random seed used for sampling.
     :return:
     """
@@ -162,7 +165,7 @@ def generate_resources_dir(db_dir, interface_dir, model_dir, models_names_list, 
     os.makedirs(os.path.join(res_dir, "tasks"), exist_ok=True)
 
     # Iterating over all the model names
-    for i, model_name in enumerate(models_names_list):
+    for model_idx, model_name in enumerate(models_names_list):
         data_d = {}
         with open(os.path.join(model_dir, model_name, "xai_index.csv"), 'r') as f:
             fieldnames = ["idx", "y", "y_pred", "path", "AI"] + XAI_names_list
@@ -181,17 +184,28 @@ def generate_resources_dir(db_dir, interface_dir, model_dir, models_names_list, 
             for fieldname in fieldnames:
                 data_d[fieldname] = np.array(data_d[fieldname])
 
-            # Randomly sampling a set of instances
-            idx_not_selected, idx_selected = train_test_split(data_d["idx"], test_size=sample_size,
-                                                              random_state=random_seed,
-                                                              stratify=data_d["y"] == data_d["y_pred"])
+            sample_size = samples_interface_list[model_idx]
+
+            # Randomly sampling a set of instances. If the accuracy of the model is 1.0, just performing a random sample
+            if target_accuracy_list[model_idx] == 1.0:
+                idx = np.arange(len(data_d["idx"]))
+                np.random.shuffle(idx)
+                idx_selected, idx_not_selected  = idx[:sample_size], idx[sample_size:]
+
+            # If the accuracy is not 1.0, using sklearn's train_test_split to separate the data while respecting the
+            # errors distribution
+            else:
+                idx_not_selected, idx_selected = train_test_split(data_d["idx"], test_size=sample_size,
+                                                                  random_state=random_seed,
+                                                                  stratify=data_d["y"] == data_d["y_pred"])
+
 
             # Extracting a positive example and a negative example (which are not part of the sampled data)
             pos_example_path, neg_example_path = _select_examples(data_d, idx_not_selected)
 
             XAI_col_path_dict = {name: data_d[name][idx_selected] for name in XAI_names_list}
 
-            _create_res_task(db_dir, model_dir, res_dir, model_name, tasks_q_list[i], pos_example_path,
+            _create_res_task(db_dir, model_dir, res_dir, model_name, tasks_q_list[model_idx], pos_example_path,
                              neg_example_path, idx_selected,data_d["y"][idx_selected], data_d["y_pred"][idx_selected],
                              data_d["path"][idx_selected], data_d["AI"][idx_selected], XAI_col_path_dict)
 
