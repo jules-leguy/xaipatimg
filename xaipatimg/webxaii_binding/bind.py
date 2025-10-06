@@ -208,8 +208,3 @@ def generate_resources_dir(db_dir, interface_dir, model_dir, models_names_list, 
             _create_res_task(db_dir, model_dir, res_dir, model_name, tasks_q_list[model_idx], pos_example_path,
                              neg_example_path, idx_selected,data_d["y"][idx_selected], data_d["y_pred"][idx_selected],
                              data_d["path"][idx_selected], data_d["AI"][idx_selected], XAI_col_path_dict)
-
-
-
-
-
