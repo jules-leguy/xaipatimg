@@ -1,6 +1,7 @@
 import csv
 import json
 import os
+import random
 import shutil
 
 import numpy as np
@@ -39,7 +40,7 @@ def _create_content_csv(res_dir, idx_selected, y, y_pred, name, XAI_col_path_dic
     AI_dir = os.path.join("res", "AI", name)
 
     for row_idx in range(len(idx_selected)):
-        curr_row_dict = {"target": y[row_idx], "pred": y_pred[row_idx],
+        curr_row_dict = {"target": y[row_idx], "pred": y_pred[row_idx], "og_idx": idx_selected[row_idx],
                          "source": os.path.join(img_dir, f"{idx_selected[row_idx]}.png"),
                          "AI": os.path.join(AI_dir, f"{idx_selected[row_idx]}.png")}
 
@@ -49,7 +50,7 @@ def _create_content_csv(res_dir, idx_selected, y, y_pred, name, XAI_col_path_dic
         csv_data.append(curr_row_dict)
 
     with open(os.path.join(res_dir, "tasks", name + "_content.csv"), 'w', newline='') as csvfile:
-        fieldnames = ["target", "pred", "source", "AI"] + ["xai_" + v for v in XAI_col_path_dict.keys()]
+        fieldnames = ["target", "pred", "og_idx", "source", "AI"] + ["xai_" + v for v in XAI_col_path_dict.keys()]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(csv_data)
@@ -141,8 +142,91 @@ def _select_examples(data_d, idx_to_consider):
 
     return pos_example_path, neg_example_path
 
+def _is_error(y, y_pred):
+    return y_pred != y
+
+def _is_pos(y):
+    return y == 1
+
+def _sample_instances(y, y_pred, sample_size, target_accuracy):
+    """
+    Performing the sampling of data.
+    :param y: vector of true labels.
+    :param y_pred: vector of predicted labels.
+    :param sample_size: size of the sample to generate.
+    :param target_accuracy: proportion of positive samples in the generated set.
+    :return: index of samples selected, index of samples not selected.
+    """
+
+    # Calculating the number of positive and negative samples (If uneven number, the majority class is selected
+    # randomly).
+    if random.random() < 0.5:
+        n_pos_target = sample_size // 2
+        n_neg_target = sample_size - n_pos_target
+    else:
+        n_neg_target = sample_size // 2
+        n_pos_target = sample_size - n_neg_target
+
+    # Calculating the number of correct samples and errors
+    n_correct_target = round(sample_size*target_accuracy)
+    n_errors_target = sample_size-n_correct_target
+
+    n_pos_selected = 0
+    n_neg_selected = 0
+    n_errors_selected = 0
+
+    # Generating random index of all samples
+    all_samples_idx = np.arange(len(y))
+    np.random.shuffle(all_samples_idx)
+
+    idx_selected = []
+
+    # Iterating over the samples to extract the model errors instances
+    for idx in all_samples_idx:
+        if _is_error(y[idx], y_pred[idx]):
+            idx_selected.append(idx)
+
+            n_errors_selected += 1
+            if _is_pos(y[idx]):
+                n_pos_selected += 1
+            else:
+                n_neg_selected += 1
+
+        if n_errors_selected == n_errors_target:
+            break
+
+    if n_errors_selected != n_errors_target:
+        raise ValueError(f"Impossible to extract the expected number of model errors ({n_errors_selected}/"
+                         f"{n_errors_target}) to reach the target shown accuracy ({target_accuracy}).")
+
+    # Iterating again to extract the rest of instances (which are correctly predicted)
+    for idx in all_samples_idx:
+        if not _is_error(y[idx], y_pred[idx]):
+            if _is_pos(y[idx]):
+                if n_pos_selected < n_pos_target:
+                    idx_selected.append(idx)
+                    n_pos_selected += 1
+            else:
+                if n_neg_selected < n_neg_target:
+                    idx_selected.append(idx)
+                    n_neg_selected += 1
+        if n_pos_selected == n_pos_target and n_neg_selected == n_neg_target:
+            break
+
+    if n_pos_selected != n_pos_target or n_neg_selected != n_neg_target:
+        raise ValueError(f"Impossible to extract the number of positive samples ({n_pos_selected}/{n_pos_target}) or"
+                         f"negative samples ({n_neg_selected}/{n_neg_target}).)")
+
+    # Shuffling the order of selected instances (to not have the model errors first)
+    idx_selected = np.array(idx_selected)
+    np.random.shuffle(idx_selected)
+
+    idx_not_selected = np.setdiff1d(all_samples_idx, idx_selected)
+
+    return idx_selected, idx_not_selected
+
 def generate_resources_dir(db_dir, interface_dir, model_dir, models_names_list, tasks_q_list, XAI_names_list,
-                           target_accuracy_list, samples_interface_list, random_seed=42):
+                           target_accuracy_list, samples_nb_interface_list, random_seed=42):
     """
     Generating the resources directory which is used in the experimental interface (WebXAII).
 
@@ -153,10 +237,14 @@ def generate_resources_dir(db_dir, interface_dir, model_dir, models_names_list, 
     :param tasks_q_list: list of task questions.
     :param XAI_names_list: list of XAI techniques as saved in the models folders.
     :param target_accuracy_list: list of target accuracy that was used when training the models.
-    :param samples_interface_list: list of samples to generate for the interface for each model.
+    :param samples_nb_interface_list: list of number of samples to generate for the interface for each model.
     :param random_seed: random seed used for sampling.
     :return:
     """
+
+    # Random seeding
+    np.random.seed(random_seed)
+    random.seed(random_seed)
 
     os.makedirs(interface_dir, exist_ok=True)
     res_dir = os.path.join(interface_dir, "res")
@@ -184,21 +272,10 @@ def generate_resources_dir(db_dir, interface_dir, model_dir, models_names_list, 
             for fieldname in fieldnames:
                 data_d[fieldname] = np.array(data_d[fieldname])
 
-            sample_size = samples_interface_list[model_idx]
-
-            # Randomly sampling a set of instances. If the accuracy of the model is 1.0, just performing a random sample
-            if target_accuracy_list[model_idx] == 1.0:
-                idx = np.arange(len(data_d["idx"]))
-                np.random.shuffle(idx)
-                idx_selected, idx_not_selected  = idx[:sample_size], idx[sample_size:]
-
-            # If the accuracy is not 1.0, using sklearn's train_test_split to separate the data while respecting the
-            # errors distribution
-            else:
-                idx_not_selected, idx_selected = train_test_split(data_d["idx"], test_size=sample_size,
-                                                                  random_state=random_seed,
-                                                                  stratify=data_d["y"] == data_d["y_pred"])
-
+            sample_size = samples_nb_interface_list[model_idx]
+            target_accuracy = target_accuracy_list[model_idx]
+            idx_selected, idx_not_selected = _sample_instances(data_d["y"], data_d["y_pred"], sample_size,
+                                                               target_accuracy)
 
             # Extracting a positive example and a negative example (which are not part of the sampled data)
             pos_example_path, neg_example_path = _select_examples(data_d, idx_not_selected)
