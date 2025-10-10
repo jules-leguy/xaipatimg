@@ -14,6 +14,7 @@ from pytorch_grad_cam.utils.image import show_cam_on_image
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from PIL import Image, ImageFont, ImageDraw
 import matplotlib.pyplot as plt
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from xaipatimg.datagen.dbimg import load_db
 from xaipatimg.datagen.genimg import gen_img
@@ -23,7 +24,8 @@ from xaipatimg.ml._colors import red_transparent_green
 from xaipatimg.ml.learning import load_resnet18_based_model, get_dataset_transformed, make_prediction
 import numpy as np
 import io
-from xaipatimg.ml.utils import nhwc_to_nchw, nchw_to_nhwc, add_margin, crop_white_border, add_border
+from xaipatimg.ml.utils import nhwc_to_nchw, nchw_to_nhwc, add_margin, crop_white_border, add_border, \
+    generate_llm_text_image
 import tqdm
 from joblib import Parallel, delayed
 
@@ -324,7 +326,7 @@ def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_p
                                       output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5)
 
     output_img_AIonly_path = os.path.join(xai_output_path, str(sample_idx) + "AIonly.png")
-    _generate_displayable_explanation(y_pred, shap_expl_1, yes_pred_img_path, no_pred_img_path, output_img_AIonly_path,
+    _generate_displayable_explanation(y_pred, None, yes_pred_img_path, no_pred_img_path, output_img_AIonly_path,
                                       output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5, AI_only=True)
 
 
@@ -345,8 +347,8 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, xai_output_path,
     Thus, the mask applied is a white zone that actually removes symbols from the image.
     :param shap_scale_img_path : path to the image that represents the shap color scale and which will be added to the
     bottom of the generated explanation. Will be ignored if None.
-    :param yes_pred_img_path: path the image that represents the yes prediction.
-    :param no_pred_img_path: path the image that represents the no prediction.
+    :param yes_pred_img_path: path to the image that represents the yes prediction.
+    :param no_pred_img_path: path to the image that represents the no prediction.
 
     :return: None.
     """
@@ -403,16 +405,19 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, xai_output_path,
         (min_shap_value, max_shap_value), shap_scale_img_path,
         yes_pred_img_path, no_pred_img_path) for i in tqdm.tqdm(range(len(X))))
 
-def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_entry, y_pred, model_dir, device,
-                                      max_depth, nb_tries_per_depth, shapes, colors, empty_probability,
+def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_entry, y, y_pred, model_dir, device,
+                                      max_depth, nb_tries_per_depth, shapes, colors, empty_probability, generic_rule_fun,
                                       yes_pred_img_path, no_pred_img_path, pos_pred_legend_path=None,
-                                      neg_pred_legend_path=None):
+                                      neg_pred_legend_path=None, **kwargs):
     """
     Generating a set of counterfactual explanations for a single sample with the random approach.
+    Generating a counterfactual to the model as well as a counterfactual to the actual sample according to the generic
+    rule function.
     :param db_dir: path of the database.
     :param sample_idx: index of the sample.
     :param xai_output_path: path where to save the xai explanations.
     :param img_entry: entry of the image in the database.
+    :param y : actual class of the sample
     :param y_pred: predicted class of the sample.
     :param model_dir: path of the model directory.
     :param device: device to use for pytorch computation.
@@ -421,22 +426,26 @@ def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_e
     :param shapes: list of possible shapes.
     :param colors: list of possible colors.
     :param empty_probability: probability of an empty cell.
-    :param yes_pred_img_path: path the image that represents the yes prediction.
-    :param no_pred_img_path: path the image that represents the no prediction.
-    :param pos_pred_legend_path: path the legend when the prediction is positive.
-    :param neg_pred_legend_path: path the legend when the prediction is negative.
+    :param generic_rule_fun: generic rule function that verifies if any sample respects the rule or not.
+    :param yes_pred_img_path: path to the image that represents the yes prediction.
+    :param no_pred_img_path: path to the image that represents the no prediction.
+    :param pos_pred_legend_path: path to the legend when the prediction is positive.
+    :param neg_pred_legend_path: path to the legend when the prediction is negative.
     :return: None
     """
 
-    cf_found = False
+    model_cf_found_dict = None
+    model_cf_found_depth = None
+    rule_cf_found_dict = None
+    rule_cf_found_depth = None
 
     for curr_depth in range(1, max_depth + 1):
 
-        counterfactuals_dict_list = []
+        mutations_dict_list = []
 
         # Generate possible counterfactuals of given mutation depth
         for _ in range(nb_tries_per_depth):
-            counterfactuals_dict_list.append(random_mutation(img_entry, curr_depth, shapes, colors, empty_probability))
+            mutations_dict_list.append(random_mutation(img_entry, curr_depth, shapes, colors, empty_probability))
 
         # Create the temporary directory and store the path
         temp_dir = tempfile.mkdtemp()
@@ -447,7 +456,7 @@ def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_e
 
         possible_cf_paths = []
         # Writing the possible counterfactuals into the temporary directory
-        for cf_id, cf_dict in enumerate(counterfactuals_dict_list):
+        for cf_id, cf_dict in enumerate(mutations_dict_list):
             curr_cf_path = join(temp_dir, str(cf_id) + ".png")
             possible_cf_paths.append(curr_cf_path)
             gen_img(curr_cf_path, cf_dict["content"], cf_dict["division"], cf_dict["size"])
@@ -461,25 +470,35 @@ def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_e
             writer = csv.writer(f)
             writer.writerows(csv_content_train)
 
-        # Verifying that the generated samples are actual counterfactuals according to the model
+        # Verifying that the generated samples are counterfactuals to the model or to the rule function
         dataset = get_dataset_transformed(db_dir, model_dir, dataset_path)
-        _, _, y_pred_cf, _ = _predict(model_dir, device, dataset)
-        actual_cf_idx_list = []
-        for y_pred_cf_idx, y_pred_curr_cf in enumerate(y_pred_cf):
-            # Exclusive or to check that the values are different
-            if bool(y_pred) ^ bool(y_pred_curr_cf):
-                actual_cf_idx_list.append(y_pred_cf_idx)
-                cf_found = True
+        _, _, y_pred_model_cf, _ = _predict(model_dir, device, dataset)
+        for y_pred_model_cf_idx, y_pred_curr_cf in enumerate(y_pred_model_cf):
+
+            # Verifying that the generated sample is an actual counterfactual to the model (exclusive or)
+            if model_cf_found_dict is None and bool(y_pred) ^ bool(y_pred_curr_cf):
+                model_cf_found_dict = mutations_dict_list[y_pred_model_cf_idx]
+                model_cf_found_depth = curr_depth
+
+            # Verifying that the generated sample is an actual counterfactual to generic rule function (differs from the
+            # model counterfactual if the model makes the wrong prediction for the sample).
+            if rule_cf_found_dict is None:
+                y_cf = int(generic_rule_fun(mutations_dict_list[y_pred_model_cf_idx]["content"], **kwargs))
+                if y_cf != y:
+                    rule_cf_found_dict = mutations_dict_list[y_pred_model_cf_idx]
+                    rule_cf_found_depth = curr_depth
+
+            if model_cf_found_dict is not None and rule_cf_found_dict is not None:
                 break
 
-        # Copying the actual original image into the XAI output directory
-        shutil.copyfile(og_img_path, os.path.join(xai_output_path, str(sample_idx) + "_og.png"))
+        # Generating the output for counterfactuals, if both were found
+        if model_cf_found_dict is not None and rule_cf_found_dict is not None:
 
-        # Generating the output for the first counterfactual found, providing at least one was found
-        if cf_found:
-            cf_dict = counterfactuals_dict_list[actual_cf_idx_list[0]]
-            coords_diff = get_coords_diff(PatImgObj(img_entry), PatImgObj(cf_dict))
-            cf_img = gen_img(None, cf_dict["content"], cf_dict["division"], cf_dict["size"],
+            # Copying the actual original image into the XAI output directory
+            shutil.copyfile(og_img_path, os.path.join(xai_output_path, str(sample_idx) + "_og.png"))
+
+            coords_diff = get_coords_diff(PatImgObj(img_entry), PatImgObj(model_cf_found_dict))
+            cf_img = gen_img(None, model_cf_found_dict["content"], model_cf_found_dict["division"], model_cf_found_dict["size"],
                              to_highlight=coords_diff, return_image=True)
 
             # Adding the legend to the explanation
@@ -493,29 +512,31 @@ def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_e
                                               output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5)
 
             output_img_AIonly_path = os.path.join(xai_output_path, str(sample_idx) + "AIonly.png")
-            _generate_displayable_explanation(y_pred, cf_img, yes_pred_img_path, no_pred_img_path,
+            _generate_displayable_explanation(y_pred, None, yes_pred_img_path, no_pred_img_path,
                                               output_img_AIonly_path,
                                               output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5,
                                               AI_only=True)
 
-            # Exporting the content of the JSON explanation
+            # Exporting the content of the JSON explanation for the model counterfactual and function counterfactual
             with open(os.path.join(xai_output_path, f"{sample_idx}.json"), 'w', encoding='utf-8') as f:
-                json.dump(cf_dict, f, ensure_ascii=False, indent=4)
+                json.dump(model_cf_found_dict, f, ensure_ascii=False, indent=4)
+            with open(os.path.join(xai_output_path, f"{sample_idx}_function.json"), 'w', encoding='utf-8') as f:
+                json.dump(rule_cf_found_dict, f, ensure_ascii=False, indent=4)
 
-            # Returning the depth that was needed to obtain a counterfactual explanation
-            return curr_depth
+            # Returning the depths that were needed to obtain the counterfactual explanations
+            return model_cf_found_depth, rule_cf_found_depth
 
         # Removing the temporary dictionary
         shutil.rmtree(temp_dir)
 
     # In case no counterfactual was found at any depth, returning None
-    return None
+    return None, None
 
 def generate_counterfactuals_resnet18_random_approach(db_dir, dataset_filename, model_dir, xai_output_path,
                                                       yes_pred_img_path, no_pred_img_path, shapes, colors,
-                                                      empty_probability, max_depth, nb_tries_per_depth, devices,
-                                                      n_jobs=-1, dataset_size=None, pos_pred_legend_path=None,
-                                                      neg_pred_legend_path=None):
+                                                      empty_probability, max_depth, nb_tries_per_depth,
+                                                      generic_rule_fun, devices, n_jobs=-1, dataset_size=None,
+                                                      pos_pred_legend_path=None, neg_pred_legend_path=None, **kwargs):
     """
     Generating counterfactual explanations for the given model and dataset. Explanations are obtained by assessing
     randomly mutated images. A mutation consists in randomly changing the content of a cell of the image.
@@ -531,8 +552,9 @@ def generate_counterfactuals_resnet18_random_approach(db_dir, dataset_filename, 
     :param dataset_filename: filename of the dataset.
     :param model_dir: path of the model directory.
     :param xai_output_path: path where to save the results.
-    :param yes_pred_img_path: path the image that represents the yes prediction.
-    :param no_pred_img_path: path the image that represents the no prediction.
+    :param yes_pred_img_path: path to the image that represents the yes prediction.
+    :param no_pred_img_path: path to the image that represents the no prediction.
+    :param generic_rule_fun: generic rule function that verifies if any sample respects the rule or not.
     :param devices: List of devices to use for pytorch computation. Jobs are distributed to all devices.
     :param n_jobs: number of jobs to run in parallel.
     :param dataset_size: elements of the dataset are loaded until the size reaches this value. If None, the whole
@@ -542,10 +564,10 @@ def generate_counterfactuals_resnet18_random_approach(db_dir, dataset_filename, 
     :param shapes: list of possible shapes.
     :param colors: list of possible colors.
     :param empty_probability: probability of an empty cell.
-    :param pos_pred_legend_path: path the legend when the prediction is positive.
-    :param neg_pred_legend_path: path the legend when the prediction is negative.
+    :param pos_pred_legend_path: path to the legend when the prediction is positive.
+    :param neg_pred_legend_path: path to the legend when the prediction is negative.
     :return: None.
-       """
+    """
 
     # Creating directories
     _create_dirs(xai_output_path)
@@ -554,27 +576,196 @@ def generate_counterfactuals_resnet18_random_approach(db_dir, dataset_filename, 
     dataset = get_dataset_transformed(db_dir, model_dir, dataset_filename, max_size=dataset_size)
 
     # Make prediction
-    X, _, y_pred, model = _predict(model_dir, devices[0], dataset)
+    X, y, y_pred, model = _predict(model_dir, devices[0], dataset)
 
     # Load database
     db = load_db(db_dir)
 
     # Parallel computation of the images for the whole dataset.
     print("Generating counterfactual images")
-    depths = Parallel(n_jobs=n_jobs)(delayed(_cf_single_sample_random_approach)(
-        db_dir, i, xai_output_path, db[dataset.get_id(i)], y_pred[i], model_dir,
-        devices[i%len(devices)], max_depth, nb_tries_per_depth, shapes, colors, empty_probability, yes_pred_img_path,
-        no_pred_img_path, pos_pred_legend_path, neg_pred_legend_path) for i in tqdm.tqdm(range(len(X))))
+    return_values = Parallel(n_jobs=n_jobs)(delayed(_cf_single_sample_random_approach)(
+        db_dir, # db_dir
+        i, # sample_idx
+        xai_output_path, # xai_output_path
+        db[dataset.get_id(i)], # img_entry
+        y[i], # y
+        y_pred[i], # y_pred
+        model_dir, # model_dir
+        devices[i%len(devices)], # device
+        max_depth, # max_depth
+        nb_tries_per_depth, # nb_tries_per_depth
+        shapes, # shapes
+        colors, #colors
+        empty_probability, # empty_probability
+        generic_rule_fun, # generic_rule_fun
+        yes_pred_img_path, # yes_pred_img_path
+        no_pred_img_path, # no_pred_img_path
+        pos_pred_legend_path, # pos_pred_legend_path
+        neg_pred_legend_path, # neg_pred_legend_path
+        **kwargs) for i in tqdm.tqdm(range(len(X))))
+
+    cf_depths, cf_verified_depths = zip(*return_values)
 
     # Writing depths of generated counterfactuals
     csv_data = [
-        {"CF_id": str(i), "depth": str(depths[i])} for i in range(len(X))
+        {"CF_id": str(i), "cf_model_depth": str(cf_depths[i]), "cf_function_depth": str(cf_verified_depths[i])}
+        for i in range(len(X))
     ]
     with open(os.path.join(xai_output_path, "CF_generation.csv"), 'w', newline='') as csvfile:
-        fieldnames = ['CF_id', 'depth']
+        fieldnames = ['CF_id', 'cf_model_depth', 'cf_function_depth']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(csv_data)
+
+def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_dict, tokenizer, dataset, y, y_pred, idx,
+                                     path_to_counterfactuals_dir_for_model_errors, pos_llm_scaffold, neg_llm_scaffold):
+    """
+    Generating the LLM explanation
+    :param db: database dictionary.
+    :param llm_model: instanciated LLM model.
+    :param tokenizer: instanciated tokenizer.
+    :param dataset: PatImgDataset instance.
+    :param y: true label of the sample.
+    :param y_pred: prediction of the model for the sample.
+    :param idx: index of explanation to generate.
+    :param path_to_counterfactuals_dir_for_model_errors: path to the directory in which counterfactual explanations have
+    been generated. If not None, the counterfactual explanation is used instead of the actual sample to generate the
+    LLM explanation when the model makes the wrong prediction. This ensures that the generated explanation is consistent
+    with the model prediction.
+    :param pos_llm_scaffold: scaffold of an explanation the LLM is supposed to generate for a positive instance.
+    :param neg_llm_scaffold: scaffold of an explanation the LLM is supposed to generate for a negative instance.
+    :return:
+    """
+
+    # Function that converts the dict image content to an equivalent with explicit color names and using the
+    # (A..F)(1..6) coordinates notation
+    def convert_content(img_content, explicit_colors_dict):
+
+        # Create dictionaries associating x and y coordinates to the corresponding value in the (A..F)(1..6) coordinates
+        # notation
+        dict_coords_y = {i: chr(ord("1") + i) for i in range(6)}
+        dict_coords_x = {i: chr(ord("A") + i) for i in range(6)}
+
+        new_content = []
+        for shape_content in img_content:
+            new_shape_content = {"shape": shape_content["shape"]}
+            x_pos, y_pos = shape_content["pos"][0], shape_content["pos"][1]
+            new_coord = dict_coords_x[x_pos] + dict_coords_y[y_pos]
+            new_shape_content["pos"] = new_coord
+            new_shape_content["color"] = explicit_colors_dict[shape_content["color"]]
+            new_content.append(new_shape_content)
+        return new_content
+
+    system_prompt = (f"You are the explainability system of an AI model. Your role is to justify the decisions of "
+                     f"the model. The role of the model is to answer questions about the content of images of "
+                     f"symbols of colors. The images are described in a JSON data structure. The coordinates "
+                     f"system uses letters from A to F for the columns and numbers from 1 to 6 for the rows. The "
+                     f"user will provide you the prediction of the AI model for a given image and the corresponding "
+                     f"JSON data. You need to give an explanation of the prediction. The explanation must be as "
+                     f"short as possible, and must refer explicitly to coordinates of the symbols, whenever "
+                     f"applicable. When listing coordinates, list all elements in increasing order of rows (all elements"
+                     f"of row 1 then all elements of row 2, etc). Use line breaks if the list contains up to 10 elements. "
+                     f"Do not use escape characters or markdown syntax. Each explanation must start with 'The AI "
+                     f"predicts |YES| because' if the prediction is Yes or"
+                     f"'The AI predicts |NO| because' if the prediction is No. The question that the model must answer to "
+                     f"is '{question}'. Here are examples of justifications for a positive and a negative sample. "
+                     f"Positive : '{pos_llm_scaffold}' Negative : '{neg_llm_scaffold}'")
+
+    # Loading the rule's counterfactual explanation instead of the original sample in case the model makes the wrong
+    # prediction, so that the class of the sample matches the class predicted by the model.
+    if path_to_counterfactuals_dir_for_model_errors is not None and y != y_pred:
+        with open(os.path.join(path_to_counterfactuals_dir_for_model_errors, f"{idx}_function.json")) as json_data:
+            img_content = str(convert_content(json.load(json_data)["content"], explicit_colors_dict))
+    # Otherwise loading the image content of the original sample
+    else:
+        img_id = dataset.get_id(idx)
+        img_content = str(convert_content(db[img_id]["content"], explicit_colors_dict))
+
+    user_prompt = f"The AI model predicts {"Yes" if y_pred == 1 else "No"} for the image : {img_content}"
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
+
+    inputs = tokenizer.apply_chat_template(
+        messages,
+        add_generation_prompt=True,
+        return_tensors="pt",
+        return_dict=True,
+    ).to(llm_model.device)
+
+    # Performing LLM computation
+    generated = llm_model.generate(**inputs, max_new_tokens=2000)
+
+    # Parsing LLM answer
+    full_answer = tokenizer.decode(generated[0][inputs["input_ids"].shape[-1]:])
+    parsed_answer = full_answer.partition("<|start|>assistant<|channel|>final<|message|>")[2]
+    parsed_answer = parsed_answer.partition("<|return|>")[0]
+    return parsed_answer
+
+def generate_LLM_explanations(db_dir, db, dataset_filename, model_dir, llm_model, llm_tokenizer, xai_output_path,
+                              explicit_colors_dict, question, yes_pred_img_path, no_pred_img_path,
+                              yes_pred_img_path_small, no_pred_img_path_small, pos_llm_scaffold, neg_llm_scaffold,
+                              device="cuda:0", dataset_size=None, only_for_index=None,
+                              path_to_counterfactuals_dir_for_model_errors=None):
+    """
+    Generating LLM explanations for the given model and dataset.
+    :param db_dir: root of the database.
+    :param db: database object.
+    :param dataset_filename: filename of the dataset.
+    :param model_dir: path of the model directory.
+    :param llm_model: llm model to use for inference.
+    :param llm_tokenizer: llm tokenizer.
+    :param xai_output_path: path where to save the results.
+    :param explicit_colors_dict: dictionary that associates color hex codes with their explicit name.
+    :param question: question corresponding to the given model.
+    :param yes_pred_img_path: path to the image that represents the yes prediction.
+    :param no_pred_img_path: path to the image that represents the no prediction.
+    :param yes_pred_img_path: path to the image that represents the yes for small rendering (as part of the LLM explanation).
+    :param no_pred_img_path: path to the image that represents the no for small rendering (as part of the LLM explanation).
+    :param pos_llm_scaffold: scaffold of an explanation the LLM is supposed to generate for a positive instance.
+    :param neg_llm_scaffold: scaffold of an explanation the LLM is supposed to generate for a negative instance.
+    :param device: device to use for pytorch computation. The LLM will use all GPUs available.
+    :param dataset_size: elements of the dataset are loaded until the size reaches this value. If None, the whole
+    dataset is loaded.
+    :param only_for_index: If not None, only the given indexes will be considered.
+    :param path_to_counterfactuals_dir_for_model_errors: If not None, when the model makes the wrong prediction, the
+    counterfactual explanation generated for the sample will be used instead of the actual sample to generate the
+    LLM explanation. This allows generating an explanation which is consistent with the model prediction.
+    :return:
+    """
+    # Creating directories
+    _create_dirs(xai_output_path)
+    print(xai_output_path)
+
+    # Loading data
+    dataset = get_dataset_transformed(db_dir, model_dir, dataset_filename, max_size=dataset_size)
+
+    # Make prediction
+    X, y, y_pred, _ = _predict(model_dir, device, dataset)
+
+    index_list = range(len(X)) if only_for_index is None else only_for_index
+    for sample_idx in tqdm.tqdm(index_list):
+
+        expl_str = _llm_generate_single_explanation(db, llm_model, question, explicit_colors_dict, llm_tokenizer,
+                                                    dataset, y[sample_idx], y_pred[sample_idx], sample_idx,
+                                                    path_to_counterfactuals_dir_for_model_errors, pos_llm_scaffold,
+                                                    neg_llm_scaffold)
+
+        expl_img = generate_llm_text_image(text=expl_str, width=700, height=700, font_size=36, line_spacing=15,
+                                           pred_img_scale=1.8, yes_pred_img_path=yes_pred_img_path_small,
+                                           no_pred_img_path=no_pred_img_path_small, margin=50)
+
+        # Saving the images to disk
+        output_img_path = os.path.join(xai_output_path, str(sample_idx) + ".png")
+        _generate_displayable_explanation(y_pred[sample_idx], expl_img, yes_pred_img_path, no_pred_img_path, output_img_path,
+                                          output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5)
+
+        output_img_AIonly_path = os.path.join(xai_output_path, str(sample_idx) + "AIonly.png")
+        _generate_displayable_explanation(y_pred, None, yes_pred_img_path, no_pred_img_path,
+                                          output_img_AIonly_path,
+                                          output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5,
+                                          AI_only=True)
 
 
 def create_xai_index(db_dir, dataset_filename, model_dir, xai_dirs, dataset_size, device):
