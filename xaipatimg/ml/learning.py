@@ -22,7 +22,8 @@ from xaipatimg.ml import resnet18_preprocess_no_norm
 
 
 class PatImgDataset(torch.utils.data.Dataset):
-    def __init__(self, db_dir, csv_dataset_filename, transform=None, target_transform=None, max_size=None):
+    def __init__(self, db_dir, datasets_dir_path, csv_dataset_filename, transform=None, target_transform=None,
+                 max_size=None):
         """
         Initialize the dataset object.
         :param db_dir: path to the root directory of the database
@@ -32,8 +33,8 @@ class PatImgDataset(torch.utils.data.Dataset):
         :param max_size: if not None, the maximum number of images to load
         """
         self.db_dir = db_dir
-        dataset_csv = pd.read_csv(os.path.join(
-            db_dir, "datasets", csv_dataset_filename))
+        self.datasets_dir_path = datasets_dir_path
+        dataset_csv = pd.read_csv(os.path.join(datasets_dir_path, csv_dataset_filename))
         self.img_list = dataset_csv["path"]
         self.img_labels = dataset_csv["class"]
         self.transform = transform
@@ -97,17 +98,26 @@ class PatImgDataset(torch.utils.data.Dataset):
         # The filename is the id
         return Path(self.img_list[idx]).stem
 
+    def get_label(self, idx):
+        """
+        Returns the label of the image with the given index.
+        :param idx: index
+        :return:
+        """
+        return self.img_labels[idx]
 
-def compute_mean_std_dataset(db_dir, dataset_filename, preprocess_no_norm):
+
+def compute_mean_std_dataset(db_dir, datasets_dir_path, dataset_filename, preprocess_no_norm):
     """
     Compute the mean and std of the transformed dataset.
     :param db_dir: root of the db
+    :param datasets_dir_path: path to the datasets directory
     :param dataset_filename: name of the csv dataset file
     :param preprocess_no_norm: preprocessing pipeline without normalization
     :return: tuple ([mean on every channel], [std on every channel])
     """
     dataset_no_norm = PatImgDataset(
-        db_dir, dataset_filename, transform=preprocess_no_norm)
+        db_dir, datasets_dir_path, dataset_filename, transform=preprocess_no_norm)
     alldata_no_norm = np.array([dataset_no_norm[i][0]
                                for i in range(len(dataset_no_norm))])
     means = [np.mean(x).astype(float) for x in
@@ -162,8 +172,9 @@ def _check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, c
         return False, counter, best_loss
 
 
-def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename, model_dir, device="cuda:0", training_epochs=90, lr=0.1,
-                         momentum=0.9, weight_decay=1e-4, batch_size=32, lr_step_size=30, lr_gamma=0.1, train_loss_write_period_logs=100,
+def train_resnet18_model(db_dir, datasets_dir_path, train_dataset_filename, valid_dataset_filename,
+                         model_dir, device="cuda:0", training_epochs=90, lr=0.1, momentum=0.9, weight_decay=1e-4,
+                         batch_size=32, lr_step_size=30, lr_gamma=0.1, train_loss_write_period_logs=100,
                          target_accuracy=1.0, training_mode="batch", patience=None, interval_batch=200):
     """
     Perform the training of the given model.
@@ -172,6 +183,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     https://github.com/pytorch/vision/tree/main/references/classification
 
     :param db_dir: path to the root directory of the database
+    :param datasets_dir_path: path to the dictory where datasets are saved
     :param train_dataset_filename: filename of the csv training dataset file
     :param valid_dataset_filename: filename of the csv validation dataset file
     :param model_dir: directory to save model and tensorboard logs
@@ -195,7 +207,7 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
     os.makedirs(model_dir, exist_ok=True)
 
     means, stds = compute_mean_std_dataset(
-        db_dir, train_dataset_filename, resnet18_preprocess_no_norm)
+        db_dir, datasets_dir_path, train_dataset_filename, resnet18_preprocess_no_norm)
     print(f"Train dataset statistics : " + str(means) + " " + str(stds))
     with open(os.path.join(model_dir, "train_set_stats.json"), "w") as f:
         json.dump({"mean": means, "std": stds}, f)
@@ -206,8 +218,8 @@ def train_resnet18_model(db_dir, train_dataset_filename, valid_dataset_filename,
         transforms.Normalize(mean=means, std=stds)
     ])
 
-    dataset_train = PatImgDataset(db_dir, train_dataset_filename, transform=preprocess)
-    dataset_valid = PatImgDataset(db_dir, valid_dataset_filename, transform=preprocess)
+    dataset_train = PatImgDataset(db_dir, datasets_dir_path, train_dataset_filename, transform=preprocess)
+    dataset_valid = PatImgDataset(db_dir, datasets_dir_path, valid_dataset_filename, transform=preprocess)
     training_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
     valid_loader = torch.utils.data.DataLoader(dataset_valid, batch_size=batch_size, shuffle=False)
 
@@ -380,11 +392,12 @@ def load_resnet18_based_model(model_dir, device):
     return model.to(device)
 
 
-def get_dataset_transformed(db_dir, model_dir, dataset_filename, max_size=None):
+def get_dataset_transformed(db_dir, datasets_dir_path, model_dir, dataset_filename, max_size=None):
     """
     Return a PatImgDataset instance for the given dataset, with a transformation that includes normalization of the data
     according to the values observed on the training dataset of the given model.
     :param db_dir: path to the directory that contains the database.
+    :param datasets_dir_path: path to the directory that contains the datasets.
     :param model_dir: path to the directory that contains the model.
     :param dataset_filename: name of the dataset to load.
     :param max_size: maximum size of the dataset to load.
@@ -403,15 +416,16 @@ def get_dataset_transformed(db_dir, model_dir, dataset_filename, max_size=None):
         transforms.Normalize(mean=means, std=stds)
     ])
 
-    return PatImgDataset(db_dir, dataset_filename, transform=preprocess, max_size=max_size)
+    return PatImgDataset(db_dir, datasets_dir_path, dataset_filename, transform=preprocess, max_size=max_size)
 
 
-def compute_resnet18_model_scores(db_dir, train_dataset_filename, test_dataset_filename, valid_dataset_filename,
-                                  model_dir, device="cuda:0"):
+def compute_resnet18_model_scores(db_dir, datasets_dir_path, train_dataset_filename, test_dataset_filename,
+                                  valid_dataset_filename, model_dir, device="cuda:0"):
     """
     Computes and writes the scores of the given model into a file in the model directory. The scores are evaluated
     on the training, validation and test sets.
     :param db_dir: path to the directory of the database.
+    :param datasets_dir_path: path to the directory that contains the datasets.
     :param train_dataset_filename: filename of the csv training dataset file.
     :param test_dataset_filename: filename of the csv test dataset file.
     :param valid_dataset_filename: filename of the csv validation dataset file.
@@ -421,9 +435,9 @@ def compute_resnet18_model_scores(db_dir, train_dataset_filename, test_dataset_f
     """
 
     # Importing the data
-    dataset_train = get_dataset_transformed(db_dir, model_dir, train_dataset_filename)
-    dataset_test = get_dataset_transformed(db_dir, model_dir, test_dataset_filename)
-    dataset_valid = get_dataset_transformed(db_dir, model_dir, valid_dataset_filename)
+    dataset_train = get_dataset_transformed(db_dir, datasets_dir_path, model_dir, train_dataset_filename)
+    dataset_test = get_dataset_transformed(db_dir, datasets_dir_path, model_dir, test_dataset_filename)
+    dataset_valid = get_dataset_transformed(db_dir, datasets_dir_path, model_dir, valid_dataset_filename)
     train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=100, shuffle=False)
     test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=100, shuffle=False)
     valid_loader = torch.utils.data.DataLoader(dataset_valid, batch_size=100, shuffle=False)
@@ -446,11 +460,13 @@ def compute_resnet18_model_scores(db_dir, train_dataset_filename, test_dataset_f
     return results
 
 
-def save_classification(db_dir, test_dataset_filename, model_dir, classification_dir, device="cuda:0", max_items=None):
+def save_classification(db_dir, datasets_dir_path, test_dataset_filename, model_dir, classification_dir,
+                        device="cuda:0", max_items=None):
     from xaipatimg.ml.xai import _create_dirs, _get_subfolder
     """
     Copy every image listed in test dataset into TP / TN / FP / FN folders to observer what the model got right or wrong.
     :param db_dir: path to the root directory of the database.
+    :param datasets_dir_path: path to the directory that contains the datasets.
     :param test_dataset_filename: filename of the csv test dataset file.
     :param model_dir: path to the directory of the model.
     :param classification_dir: path to the root directory of the classified image
@@ -470,6 +486,7 @@ def save_classification(db_dir, test_dataset_filename, model_dir, classification
 
     dataset = get_dataset_transformed(
         db_dir=db_dir,
+        datasets_dir_path=datasets_dir_path,
         model_dir=model_dir,
         dataset_filename=test_dataset_filename,
         max_size=max_items,
