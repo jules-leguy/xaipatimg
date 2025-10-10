@@ -9,12 +9,14 @@ from sklearn.model_selection import train_test_split
 from xaipatimg.datagen.utils import PatImgObj
 
 
-def create_dataset_based_on_rule(db_dir, csv_filename_train, csv_filename_test, csv_filename_valid, test_size,
-                                 valid_size, dataset_pos_samples_nb, dataset_neg_samples_nb, rule_fun, random_seed=42, **kwargs):
+def create_dataset_based_on_rule(db_dir, datasets_dir_path, csv_filename_train, csv_filename_test, csv_filename_valid,
+                                 test_size, valid_size, dataset_pos_samples_nb, dataset_neg_samples_nb, rule_fun,
+                                 random_seed=42, **kwargs):
     """
     Function that creates a training dataset based on the rule that is defined in the rule_fun function. The dataset is
     saved as a csv file and contains a given number of positive and negative samples.
     :param db_dir: path to the root directory of the database.
+    :param datasets_dir_path: path to the directory where the datasets will be saved.
     :param csv_filename_train: name of the csv file that contains the training dataset.
     :param csv_filename_test: name of the csv file that contains the testing dataset.
     :param csv_filename_valid: name of the csv file that contains the validation dataset.
@@ -82,21 +84,23 @@ def create_dataset_based_on_rule(db_dir, csv_filename_train, csv_filename_test, 
                                   np.concatenate((["class"], y_valid), axis=0)]).T
 
     # Writing dataset to CSV files
-    os.makedirs(os.path.join(db_dir, "datasets"), exist_ok=True)
-    with open(os.path.join(db_dir, "datasets", csv_filename_train), 'w') as f:
+    os.makedirs(datasets_dir_path, exist_ok=True)
+    with open(os.path.join(datasets_dir_path, csv_filename_train), 'w') as f:
         writer = csv.writer(f)
         writer.writerows(csv_content_train)
-    with open(os.path.join(db_dir, "datasets", csv_filename_test), 'w') as f:
+    with open(os.path.join(datasets_dir_path, csv_filename_test), 'w') as f:
         writer = csv.writer(f)
         writer.writerows(csv_content_test)
-    with open(os.path.join(db_dir, "datasets", csv_filename_valid), 'w') as f:
+    with open(os.path.join(datasets_dir_path, csv_filename_valid), 'w') as f:
         writer = csv.writer(f)
         writer.writerows(csv_content_valid)
 
-def extract_sample_from_dataset(db_dir, csv_filename, output_dir_path, pos_samples_nb, neg_samples_nb):
+def extract_sample_from_dataset(db_dir, datasets_dir_path, csv_filename, output_dir_path, pos_samples_nb,
+                                neg_samples_nb):
     """
     Function that copies samples from the given dataset in order to visualize the images.
     :param db_dir: path to the root directory of the database.
+    :param datasets_dir_path: path to the directory where the datasets will be saved.
     :param csv_filename: name of the csv file contained in the database folder.
     :param output_dir_path: path where to save the sample of the dataset.
     :param pos_samples_nb: number of positive samples to extract.
@@ -117,7 +121,7 @@ def extract_sample_from_dataset(db_dir, csv_filename, output_dir_path, pos_sampl
         os.makedirs(neg_dir_path)
 
     # Copy files
-    with open(os.path.join(db_dir, "datasets", csv_filename), "r") as csv_file:
+    with open(os.path.join(datasets_dir_path, csv_filename), "r") as csv_file:
         csv_reader = csv.reader(csv_file, delimiter=',')
         for row in tqdm.tqdm(csv_reader):
             if row[1] == "1" and pos_nb < pos_samples_nb:
@@ -241,8 +245,8 @@ def generic_rule_N_times_color_exactly(img_content, N, color, x_division, y_divi
 
 def generic_rule_shape_color_plus_shape_equals_N(img_content, shape1, color1, shape2, N, x_division, y_division):
     """
-    Return true iff the number of instances of the given color plus the number of instances of the given shape equals
-    the given N value.
+    Return true iff the number of instances of the given color and shape plus the number of instances of the given
+    shape equals the given N value.
     :param img_content: dictionary content of the image.
     :param shape1: shape of the first element to count.
     :param color1: color of the first element to count.
@@ -255,6 +259,22 @@ def generic_rule_shape_color_plus_shape_equals_N(img_content, shape1, color1, sh
     obj = PatImgObj({"content": img_content, "division": (x_division, y_division), "path": None, "size": None})
     return len(obj.get_symbols_by(shape=shape1, color=color1)) + len(obj.get_symbols_by(shape=shape2)) == N
 
+def generic_rule_shape_color_times_2_shape_equals_shape(img_content, shape1, color1, shape2, x_division, y_division):
+    """
+    Return true iff the number of instances of the given color and shape multiplied by 2 equals to the number of
+    instances of the given shape
+    the given N value.
+    :param img_content: dictionary content of the image.
+    :param shape1: shape of the first element to count.
+    :param color1: color of the first element to count.
+    :param shape2: shape of the second element to count.
+    :param x_division: number of x divisions.
+    :param y_division: number of y divisions.
+    :return:
+    """
+    obj = PatImgObj({"content": img_content, "division": (x_division, y_division), "path": None, "size": None})
+    return len(obj.get_symbols_by(shape=shape1, color=color1)) * 2 == len(obj.get_symbols_by(shape=shape2))
+
 def generic_rule_shape_in_every_row(img_content, shape, y_division):
     """
     Return True iff there is the given shape in every row of the image.
@@ -266,7 +286,7 @@ def generic_rule_shape_in_every_row(img_content, shape, y_division):
     _, pattern_count, _ = _extract_rows_with_only_shape_or_color(img_content, y_division, shape=shape)
     return np.all(pattern_count)
 
-def create_dataset_generic_rule_extract_sample(db_dir, csv_name_train, csv_name_test, csv_name_valid,
+def create_dataset_generic_rule_extract_sample(db_dir, datasets_dir_path, csv_name_train, csv_name_test, csv_name_valid,
                                                test_size, valid_size, dataset_pos_samples_nb, dataset_neg_samples_nb,
                                                sample_path, sample_nb_per_class, generic_rule_fun, **kwargs):
     """
@@ -289,11 +309,12 @@ def create_dataset_generic_rule_extract_sample(db_dir, csv_name_train, csv_name_
     """
 
     # Dataset generation
-    create_dataset_based_on_rule(db_dir, csv_name_train, csv_name_test, csv_name_valid,
+    create_dataset_based_on_rule(db_dir, datasets_dir_path, csv_name_train, csv_name_test, csv_name_valid,
                                  test_size=test_size, valid_size=valid_size,
                                  dataset_pos_samples_nb=dataset_pos_samples_nb,
                                  dataset_neg_samples_nb=dataset_neg_samples_nb,
                                  rule_fun=generic_rule_fun, **kwargs)
 
     # Sample extraction
-    extract_sample_from_dataset(db_dir, csv_name_train, sample_path, sample_nb_per_class, sample_nb_per_class)
+    extract_sample_from_dataset(db_dir, datasets_dir_path, csv_name_train, sample_path, sample_nb_per_class,
+                                sample_nb_per_class)
