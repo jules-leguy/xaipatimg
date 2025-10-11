@@ -39,6 +39,7 @@ def _create_dirs(xai_output_path):
     """
     os.makedirs(xai_output_path, exist_ok=True)
 
+
 def _predict(model_dir, device, dataset):
     """
     Utility function to make predictions with the given model on the given dataset
@@ -60,6 +61,7 @@ def _predict(model_dir, device, dataset):
         y_pred.extend(pred)
 
     return X, y, y_pred, model
+
 
 def _vertical_concatenation(top_img, bottom_img):
     """
@@ -96,6 +98,7 @@ def _vertical_concatenation(top_img, bottom_img):
     combined.paste(top_img, (x1, 0))
     combined.paste(bottom_img, (x2, int(top_img.height - 0.2 * bottom_img.height)))
     return combined
+
 
 def _generate_displayable_explanation(model_pred, explanation_img, yes_pred_img_path, no_pred_img_path, out_path,
                                       output_size, left_ratio=0.5, font_size=40, padding=20, AI_only=False):
@@ -206,11 +209,13 @@ def _generate_displayable_explanation(model_pred, explanation_img, yes_pred_img_
 
     canvas.save(out_path)
 
-def generate_cam_resnet18(cam_technique, db_dir, dataset_filename, model_dir, device="cuda:0"):
+
+def generate_cam_resnet18(cam_technique, db_dir, datasets_dir_path, dataset_filename, model_dir, device="cuda:0"):
     """
     Generating cam images for given model on test set, which are saved into the model directory.
     :param cam_technique: description of the cam technique (str) to use to generate explanations
     :param db_dir: root of the database.
+    :param datasets_dir_path: path where the datasets are located
     :param model_dir: path of the model directory.
     :param dataset_filename: filename of the dataset.
     :param device: device to use for pytorch computation.
@@ -229,7 +234,7 @@ def generate_cam_resnet18(cam_technique, db_dir, dataset_filename, model_dir, de
     _create_dirs(xai_output_path)
 
     # Loading data
-    dataset = get_dataset_transformed(db_dir, model_dir, dataset_filename)
+    dataset = get_dataset_transformed(db_dir, datasets_dir_path, model_dir, dataset_filename)
 
     # Make prediction
     X, y, _, model = _predict(model_dir, device, dataset)
@@ -290,7 +295,7 @@ def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_p
     shap.image_plot(shap_values=shap_values, pixel_values=img_numpy, show=False, width=18,
                     colormap_lim=max(abs(shap_values_lim[0]), abs(shap_values_lim[1])),
                     cmap=red_transparent_green)
-    
+
     plt.gcf().axes[-1].remove()
 
     # Loading the plot as a PIL Image
@@ -330,11 +335,13 @@ def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_p
                                       output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5, AI_only=True)
 
 
-def generate_shap_resnet18(db_dir, dataset_filename, model_dir, xai_output_path, yes_pred_img_path, no_pred_img_path,
-                           device="cuda:0", n_jobs=-1, dataset_size=None, masker="blur(128,128)", shap_scale_img_path=None):
+def generate_shap_resnet18(db_dir, datasets_dir_path, dataset_filename, model_dir, xai_output_path, yes_pred_img_path,
+                           no_pred_img_path, device="cuda:0", n_jobs=-1, dataset_size=None, masker="blur(128,128)",
+                           shap_scale_img_path=None):
     """
     Generating shap explanations for the given model and dataset, which are stored into the model directory.
     :param db_dir: root of the database.
+    :param datasets_dir_path: path to the directory where the datasets are located.
     :param dataset_filename: filename of the dataset.
     :param model_dir: path of the model directory.
     :param xai_output_path: path where to save the results.
@@ -357,7 +364,7 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, xai_output_path,
     _create_dirs(xai_output_path)
 
     # Loading data
-    dataset = get_dataset_transformed(db_dir, model_dir, dataset_filename, max_size=dataset_size)
+    dataset = get_dataset_transformed(db_dir, datasets_dir_path, model_dir, dataset_filename, max_size=dataset_size)
 
     # Make prediction
     X, _, y_pred, model = _predict(model_dir, device, dataset)
@@ -405,9 +412,99 @@ def generate_shap_resnet18(db_dir, dataset_filename, model_dir, xai_output_path,
         (min_shap_value, max_shap_value), shap_scale_img_path,
         yes_pred_img_path, no_pred_img_path) for i in tqdm.tqdm(range(len(X))))
 
-def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_entry, y, y_pred, model_dir, device,
-                                      max_depth, nb_tries_per_depth, shapes, colors, empty_probability, generic_rule_fun,
-                                      yes_pred_img_path, no_pred_img_path, pos_pred_legend_path=None,
+
+def generate_counterfactuals_resnet18_random_approach(db_dir, datasets_dir_path, dataset_filename, model_dir,
+                                                      xai_output_path, yes_pred_img_path, no_pred_img_path, shapes,
+                                                      colors, empty_probability, max_depth, nb_tries_per_depth,
+                                                      generic_rule_fun, devices, n_jobs=-1, dataset_size=None,
+                                                      pos_pred_legend_path=None, neg_pred_legend_path=None, **kwargs):
+    """
+    Generating counterfactual explanations for the given model and dataset. Explanations are obtained by assessing
+    randomly mutated images. A mutation consists in randomly changing the content of a cell of the image.
+    The algorithm used is the following:
+
+    for curr_depth in (1..max_depth):
+        for curr_try in (1..nb_tries_per_depth):
+            cf_try <- random_mutation(depth=curr_depth)
+            if cf_try is a counterfactual:
+                return cf_try
+
+    :param db_dir: root of the database.
+    :param datasets_dir_path: path to the directory where the datasets are located.
+    :param dataset_filename: filename of the dataset.
+    :param model_dir: path of the model directory.
+    :param xai_output_path: path where to save the results.
+    :param yes_pred_img_path: path to the image that represents the yes prediction.
+    :param no_pred_img_path: path to the image that represents the no prediction.
+    :param generic_rule_fun: generic rule function that verifies if any sample respects the rule or not.
+    :param devices: List of devices to use for pytorch computation. Jobs are distributed to all devices.
+    :param n_jobs: number of jobs to run in parallel.
+    :param dataset_size: elements of the dataset are loaded until the size reaches this value. If None, the whole
+    dataset is loaded.
+    :param max_depth: maximum number of random mutations in the generated counterfactuals.
+    :param nb_tries_per_depth: number of mutations which are assessed for each depth.
+    :param shapes: list of possible shapes.
+    :param colors: list of possible colors.
+    :param empty_probability: probability of an empty cell.
+    :param pos_pred_legend_path: path to the legend when the prediction is positive.
+    :param neg_pred_legend_path: path to the legend when the prediction is negative.
+    :return: None.
+    """
+
+    # Creating directories
+    _create_dirs(xai_output_path)
+
+    # Loading data
+    dataset = get_dataset_transformed(db_dir, datasets_dir_path, model_dir, dataset_filename, max_size=dataset_size)
+
+    # Make prediction
+    X, y, y_pred, model = _predict(model_dir, devices[0], dataset)
+
+    # Load database
+    db = load_db(db_dir)
+
+    # Parallel computation of the images for the whole dataset.
+    print("Generating counterfactual images")
+    return_values = Parallel(n_jobs=n_jobs)(delayed(_cf_single_sample_random_approach)(
+        db_dir,  # db_dir
+        datasets_dir_path,  # datasets_dir_path
+        i,  # sample_idx
+        xai_output_path,  # xai_output_path
+        db[dataset.get_id(i)],  # img_entry
+        y[i],  # y
+        y_pred[i],  # y_pred
+        model_dir,  # model_dir
+        devices[i % len(devices)],  # device
+        max_depth,  # max_depth
+        nb_tries_per_depth,  # nb_tries_per_depth
+        shapes,  # shapes
+        colors,  # colors
+        empty_probability,  # empty_probability
+        generic_rule_fun,  # generic_rule_fun
+        yes_pred_img_path,  # yes_pred_img_path
+        no_pred_img_path,  # no_pred_img_path
+        pos_pred_legend_path,  # pos_pred_legend_path
+        neg_pred_legend_path,  # neg_pred_legend_path
+        **kwargs) for i in tqdm.tqdm(range(len(X))))
+
+    cf_depths, cf_verified_depths = zip(*return_values)
+
+    # Writing depths of generated counterfactuals
+    csv_data = [
+        {"CF_id": str(i), "cf_model_depth": str(cf_depths[i]), "cf_function_depth": str(cf_verified_depths[i])}
+        for i in range(len(X))
+    ]
+    with open(os.path.join(xai_output_path, "CF_generation.csv"), 'w', newline='') as csvfile:
+        fieldnames = ['CF_id', 'cf_model_depth', 'cf_function_depth']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(csv_data)
+
+
+def _cf_single_sample_random_approach(db_dir, datasets_dir_path, sample_idx, xai_output_path, img_entry, y, y_pred,
+                                      model_dir, device, max_depth, nb_tries_per_depth, shapes, colors,
+                                      empty_probability, generic_rule_fun, yes_pred_img_path, no_pred_img_path,
+                                      pos_pred_legend_path=None,
                                       neg_pred_legend_path=None, **kwargs):
     """
     Generating a set of counterfactual explanations for a single sample with the random approach.
@@ -463,7 +560,7 @@ def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_e
 
         # Writing a CSV dataset of counterfactuals to be able to pass them through the model
         dataset_path = os.path.join(temp_dir, "dataset.csv")
-        y_cf = [None for _ in range(len(possible_cf_paths))] # These values will not be used so they are set to None
+        y_cf = [None for _ in range(len(possible_cf_paths))]  # These values will not be used so they are set to None
         csv_content_train = np.array([np.concatenate((["path"], possible_cf_paths), axis=0),
                                       np.concatenate((["class"], y_cf), axis=0)]).T
         with open(dataset_path, 'w') as f:
@@ -471,7 +568,7 @@ def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_e
             writer.writerows(csv_content_train)
 
         # Verifying that the generated samples are counterfactuals to the model or to the rule function
-        dataset = get_dataset_transformed(db_dir, model_dir, dataset_path)
+        dataset = get_dataset_transformed(db_dir, datasets_dir_path, model_dir, dataset_path)
         _, _, y_pred_model_cf, _ = _predict(model_dir, device, dataset)
         for y_pred_model_cf_idx, y_pred_curr_cf in enumerate(y_pred_model_cf):
 
@@ -498,7 +595,8 @@ def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_e
             shutil.copyfile(og_img_path, os.path.join(xai_output_path, str(sample_idx) + "_og.png"))
 
             coords_diff = get_coords_diff(PatImgObj(img_entry), PatImgObj(model_cf_found_dict))
-            cf_img = gen_img(None, model_cf_found_dict["content"], model_cf_found_dict["division"], model_cf_found_dict["size"],
+            cf_img = gen_img(None, model_cf_found_dict["content"], model_cf_found_dict["division"],
+                             model_cf_found_dict["size"],
                              to_highlight=coords_diff, return_image=True)
 
             # Adding the legend to the explanation
@@ -532,90 +630,6 @@ def _cf_single_sample_random_approach(db_dir, sample_idx, xai_output_path, img_e
     # In case no counterfactual was found at any depth, returning None
     return None, None
 
-def generate_counterfactuals_resnet18_random_approach(db_dir, dataset_filename, model_dir, xai_output_path,
-                                                      yes_pred_img_path, no_pred_img_path, shapes, colors,
-                                                      empty_probability, max_depth, nb_tries_per_depth,
-                                                      generic_rule_fun, devices, n_jobs=-1, dataset_size=None,
-                                                      pos_pred_legend_path=None, neg_pred_legend_path=None, **kwargs):
-    """
-    Generating counterfactual explanations for the given model and dataset. Explanations are obtained by assessing
-    randomly mutated images. A mutation consists in randomly changing the content of a cell of the image.
-    The algorithm used is the following:
-
-    for curr_depth in (1..max_depth):
-        for curr_try in (1..nb_tries_per_depth):
-            cf_try <- random_mutation(depth=curr_depth)
-            if cf_try is a counterfactual:
-                return cf_try
-
-    :param db_dir: root of the database.
-    :param dataset_filename: filename of the dataset.
-    :param model_dir: path of the model directory.
-    :param xai_output_path: path where to save the results.
-    :param yes_pred_img_path: path to the image that represents the yes prediction.
-    :param no_pred_img_path: path to the image that represents the no prediction.
-    :param generic_rule_fun: generic rule function that verifies if any sample respects the rule or not.
-    :param devices: List of devices to use for pytorch computation. Jobs are distributed to all devices.
-    :param n_jobs: number of jobs to run in parallel.
-    :param dataset_size: elements of the dataset are loaded until the size reaches this value. If None, the whole
-    dataset is loaded.
-    :param max_depth: maximum number of random mutations in the generated counterfactuals.
-    :param nb_tries_per_depth: number of mutations which are assessed for each depth.
-    :param shapes: list of possible shapes.
-    :param colors: list of possible colors.
-    :param empty_probability: probability of an empty cell.
-    :param pos_pred_legend_path: path to the legend when the prediction is positive.
-    :param neg_pred_legend_path: path to the legend when the prediction is negative.
-    :return: None.
-    """
-
-    # Creating directories
-    _create_dirs(xai_output_path)
-
-    # Loading data
-    dataset = get_dataset_transformed(db_dir, model_dir, dataset_filename, max_size=dataset_size)
-
-    # Make prediction
-    X, y, y_pred, model = _predict(model_dir, devices[0], dataset)
-
-    # Load database
-    db = load_db(db_dir)
-
-    # Parallel computation of the images for the whole dataset.
-    print("Generating counterfactual images")
-    return_values = Parallel(n_jobs=n_jobs)(delayed(_cf_single_sample_random_approach)(
-        db_dir, # db_dir
-        i, # sample_idx
-        xai_output_path, # xai_output_path
-        db[dataset.get_id(i)], # img_entry
-        y[i], # y
-        y_pred[i], # y_pred
-        model_dir, # model_dir
-        devices[i%len(devices)], # device
-        max_depth, # max_depth
-        nb_tries_per_depth, # nb_tries_per_depth
-        shapes, # shapes
-        colors, #colors
-        empty_probability, # empty_probability
-        generic_rule_fun, # generic_rule_fun
-        yes_pred_img_path, # yes_pred_img_path
-        no_pred_img_path, # no_pred_img_path
-        pos_pred_legend_path, # pos_pred_legend_path
-        neg_pred_legend_path, # neg_pred_legend_path
-        **kwargs) for i in tqdm.tqdm(range(len(X))))
-
-    cf_depths, cf_verified_depths = zip(*return_values)
-
-    # Writing depths of generated counterfactuals
-    csv_data = [
-        {"CF_id": str(i), "cf_model_depth": str(cf_depths[i]), "cf_function_depth": str(cf_verified_depths[i])}
-        for i in range(len(X))
-    ]
-    with open(os.path.join(xai_output_path, "CF_generation.csv"), 'w', newline='') as csvfile:
-        fieldnames = ['CF_id', 'cf_model_depth', 'cf_function_depth']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(csv_data)
 
 def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_dict, tokenizer, dataset, y, y_pred, idx,
                                      path_to_counterfactuals_dir_for_model_errors, pos_llm_scaffold, neg_llm_scaffold):
@@ -703,8 +717,9 @@ def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_di
     parsed_answer = parsed_answer.partition("<|return|>")[0]
     return parsed_answer
 
-def generate_LLM_explanations(db_dir, db, dataset_filename, model_dir, llm_model, llm_tokenizer, xai_output_path,
-                              explicit_colors_dict, question, yes_pred_img_path, no_pred_img_path,
+
+def generate_LLM_explanations(db_dir, db, datasets_dir_path, dataset_filename, model_dir, llm_model, llm_tokenizer,
+                              xai_output_path, explicit_colors_dict, question, yes_pred_img_path, no_pred_img_path,
                               yes_pred_img_path_small, no_pred_img_path_small, pos_llm_scaffold, neg_llm_scaffold,
                               device="cuda:0", dataset_size=None, only_for_index=None,
                               path_to_counterfactuals_dir_for_model_errors=None):
@@ -712,6 +727,7 @@ def generate_LLM_explanations(db_dir, db, dataset_filename, model_dir, llm_model
     Generating LLM explanations for the given model and dataset.
     :param db_dir: root of the database.
     :param db: database object.
+    :param datasets_dir_path: path to the directory where the datasets are located.
     :param dataset_filename: filename of the dataset.
     :param model_dir: path of the model directory.
     :param llm_model: llm model to use for inference.
@@ -739,14 +755,13 @@ def generate_LLM_explanations(db_dir, db, dataset_filename, model_dir, llm_model
     print(xai_output_path)
 
     # Loading data
-    dataset = get_dataset_transformed(db_dir, model_dir, dataset_filename, max_size=dataset_size)
+    dataset = get_dataset_transformed(db_dir, datasets_dir_path, model_dir, dataset_filename, max_size=dataset_size)
 
     # Make prediction
     X, y, y_pred, _ = _predict(model_dir, device, dataset)
 
     index_list = range(len(X)) if only_for_index is None else only_for_index
     for sample_idx in tqdm.tqdm(index_list):
-
         expl_str = _llm_generate_single_explanation(db, llm_model, question, explicit_colors_dict, llm_tokenizer,
                                                     dataset, y[sample_idx], y_pred[sample_idx], sample_idx,
                                                     path_to_counterfactuals_dir_for_model_errors, pos_llm_scaffold,
@@ -758,7 +773,8 @@ def generate_LLM_explanations(db_dir, db, dataset_filename, model_dir, llm_model
 
         # Saving the images to disk
         output_img_path = os.path.join(xai_output_path, str(sample_idx) + ".png")
-        _generate_displayable_explanation(y_pred[sample_idx], expl_img, yes_pred_img_path, no_pred_img_path, output_img_path,
+        _generate_displayable_explanation(y_pred[sample_idx], expl_img, yes_pred_img_path, no_pred_img_path,
+                                          output_img_path,
                                           output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5)
 
         output_img_AIonly_path = os.path.join(xai_output_path, str(sample_idx) + "AIonly.png")
@@ -768,11 +784,12 @@ def generate_LLM_explanations(db_dir, db, dataset_filename, model_dir, llm_model
                                           AI_only=True)
 
 
-def create_xai_index(db_dir, dataset_filename, model_dir, xai_dirs, dataset_size, device):
+def create_xai_index(db_dir, datasets_dir_path, dataset_filename, model_dir, xai_dirs, dataset_size, device):
     """
     Creating a csv file which contains the information of (dataset index, class, model prediction, path to image, [path to every xai generated image],
     path to the generated image for the prediction only).
     :param db_dir: root of the database.
+    :param datasets_dir_path: path to the directory where the datasets are located.
     :param dataset_filename: filename of the dataset.
     :param model_dir: path of the model directory.
     :param xai_dirs: dictionary that contains for every explanation type, the path to where the explanations are saved.
@@ -783,7 +800,7 @@ def create_xai_index(db_dir, dataset_filename, model_dir, xai_dirs, dataset_size
     """
 
     # Loading data
-    dataset = get_dataset_transformed(db_dir, model_dir, dataset_filename, max_size=dataset_size)
+    dataset = get_dataset_transformed(db_dir, datasets_dir_path, model_dir, dataset_filename, max_size=dataset_size)
 
     # Make prediction
     X, y, y_pred, model = _predict(model_dir, device, dataset)
