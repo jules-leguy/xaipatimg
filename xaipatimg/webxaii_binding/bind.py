@@ -148,13 +148,13 @@ def _is_error(y, y_pred):
 def _is_pos(y):
     return y == 1
 
-def _sample_instances(y, y_pred, sample_size, target_accuracy):
+def _sample_instances(y, y_pred, sample_size, shown_accuracy):
     """
     Performing the sampling of data.
     :param y: vector of true labels.
     :param y_pred: vector of predicted labels.
     :param sample_size: size of the sample to generate.
-    :param target_accuracy: proportion of positive samples in the generated set.
+    :param shown_accuracy: proportion of positive samples in the generated set.
     :return: index of samples selected, index of samples not selected.
     """
 
@@ -168,7 +168,7 @@ def _sample_instances(y, y_pred, sample_size, target_accuracy):
         n_pos_target = sample_size - n_neg_target
 
     # Calculating the number of correct samples and errors
-    n_correct_target = round(sample_size*target_accuracy)
+    n_correct_target = round(sample_size*shown_accuracy)
     n_errors_target = sample_size-n_correct_target
 
     n_pos_selected = 0
@@ -197,7 +197,7 @@ def _sample_instances(y, y_pred, sample_size, target_accuracy):
 
     if n_errors_selected != n_errors_target:
         raise ValueError(f"Impossible to extract the expected number of model errors ({n_errors_selected}/"
-                         f"{n_errors_target}) to reach the target shown accuracy ({target_accuracy}).")
+                         f"{n_errors_target}) to reach the target shown accuracy ({shown_accuracy}).")
 
     # Iterating again to extract the rest of instances (which are correctly predicted)
     for idx in all_samples_idx:
@@ -226,7 +226,7 @@ def _sample_instances(y, y_pred, sample_size, target_accuracy):
     return idx_selected, idx_not_selected
 
 def generate_resources_dir(db_dir, interface_dir, model_dir, models_names_list, tasks_q_list, XAI_names_list,
-                           target_accuracy_list, samples_nb_interface_list, random_seed=42):
+                           shown_accuracy_list, samples_nb_interface_list, random_seed=42):
     """
     Generating the resources directory which is used in the experimental interface (WebXAII).
 
@@ -236,7 +236,7 @@ def generate_resources_dir(db_dir, interface_dir, model_dir, models_names_list, 
     :param models_names_list: list of model names.
     :param tasks_q_list: list of task questions.
     :param XAI_names_list: list of XAI techniques as saved in the models folders.
-    :param target_accuracy_list: list of target accuracy that was used when training the models.
+    :param shown_accuracy_list: list of target accuracy that was used when training the models.
     :param samples_nb_interface_list: list of number of samples to generate for the interface for each model.
     :param random_seed: random seed used for sampling.
     :return:
@@ -273,9 +273,9 @@ def generate_resources_dir(db_dir, interface_dir, model_dir, models_names_list, 
                 data_d[fieldname] = np.array(data_d[fieldname])
 
             sample_size = samples_nb_interface_list[model_idx]
-            target_accuracy = target_accuracy_list[model_idx]
+            shown_accuracy = shown_accuracy_list[model_idx]
             idx_selected, idx_not_selected = _sample_instances(data_d["y"], data_d["y_pred"], sample_size,
-                                                               target_accuracy)
+                                                               shown_accuracy)
 
             # Extracting a positive example and a negative example (which are not part of the sampled data)
             pos_example_path, neg_example_path = _select_examples(data_d, idx_not_selected)
