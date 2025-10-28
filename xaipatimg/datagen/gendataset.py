@@ -11,7 +11,7 @@ from xaipatimg.datagen.utils import PatImgObj
 
 def create_dataset_based_on_rule(db_dir, datasets_dir_path, csv_filename_train, csv_filename_test, csv_filename_valid,
                                  test_size, valid_size, dataset_pos_samples_nb, dataset_neg_samples_nb, rule_fun,
-                                 random_seed=42, **kwargs):
+                                 random_seed=42, filter_on_dim=None, **kwargs):
     """
     Function that creates a training dataset based on the rule that is defined in the rule_fun function. The dataset is
     saved as a csv file and contains a given number of positive and negative samples.
@@ -27,6 +27,7 @@ def create_dataset_based_on_rule(db_dir, datasets_dir_path, csv_filename_train, 
     :param dataset_neg_samples_nb: number of negative samples to be contained in the dataset.
     :param rule_fun: boolean function that defines whether the given image content is positive or negative.
     :param random_seed: seed which is used for dataset random ordering.
+    :param filter_on_dim: if tuple (xdim, ydim), only the images with this dimension will be considered.
     :return: None
     """
     # Load and shuffle images content
@@ -42,12 +43,18 @@ def create_dataset_based_on_rule(db_dir, datasets_dir_path, csv_filename_train, 
 
     # Extracting positive and negative samples
     for img_content in tqdm.tqdm(img_content_list):
-        is_positive = rule_fun(img_content["content"], **kwargs)
+
+        if filter_on_dim is not None:
+            if img_content["division"] != filter_on_dim:
+                continue
+
+        is_positive, is_excluded = rule_fun(img_content["content"], **kwargs)
+
         if is_positive:
             if pos_nb < dataset_pos_samples_nb:
                 pos_list.append(img_content["path"])
             pos_nb += 1
-        else:
+        elif not is_excluded:
             if neg_nb < dataset_neg_samples_nb:
                 neg_list.append(img_content["path"])
             neg_nb += 1
@@ -192,10 +199,10 @@ def generic_rule_exist_row_with_only_shape(img_content, shape, y_division):
     :param img_content: dictionary content of the image.
     :param shape: shape to identify.
     :param y_division: number of y divisions.
-    :return:
+    :return: respects rule, is_excluded (no exclusion criteria)
     """
     match, _, _ = _extract_rows_with_only_shape_or_color(img_content, y_division, shape=shape)
-    return np.sum(match) >= 1
+    return np.sum(match) >= 1, False
 
 def generic_rule_exist_row_with_only_color(img_content, color, y_division):
     """
@@ -203,10 +210,10 @@ def generic_rule_exist_row_with_only_color(img_content, color, y_division):
     :param img_content: dictionary content of the image.
     :param color: color to identify.
     :param y_division: number of y divisions.
-    :return:
+    :return: respects rule, is_excluded (no exclusion criteria)
     """
     match, _, _ = _extract_rows_with_only_shape_or_color(img_content, y_division, color=color)
-    return np.sum(match) >= 1
+    return np.sum(match) >= 1, False
 
 def generic_rule_exist_column_with_only_shape(img_content, shape, x_division):
     """
@@ -214,9 +221,9 @@ def generic_rule_exist_column_with_only_shape(img_content, shape, x_division):
     :param img_content: dictionary content of the image.
     :param shape: shape to identify.
     :param x_division: number of y divisions.
-    :return:
+    :return: respects rule, is_excluded (no exclusion criteria)
     """
-    return np.sum(_extract_cols_with_only_shape_or_color(img_content, x_division, shape=shape)) >= 1
+    return np.sum(_extract_cols_with_only_shape_or_color(img_content, x_division, shape=shape)) >= 1, False
 
 def generic_rule_exist_row_with_only_color_and_col_with_only_shape(img_content, color, shape, x_division, y_division):
     """
@@ -227,10 +234,10 @@ def generic_rule_exist_row_with_only_color_and_col_with_only_shape(img_content, 
     :param shape: shape to identify.
     :param x_division: number of x divisions.
     :param y_division: number of y divisions.
-    :return:
+    :return: respects rule, is_excluded (no exclusion criteria)
     """
     return generic_rule_exist_row_with_only_color(img_content, color, y_division) \
-        and generic_rule_exist_column_with_only_shape(img_content, shape, x_division)
+        and generic_rule_exist_column_with_only_shape(img_content, shape, x_division), False
 
 def generic_rule_N_times_color_exactly(img_content, N, color, x_division, y_division):
     """
@@ -238,10 +245,10 @@ def generic_rule_N_times_color_exactly(img_content, N, color, x_division, y_divi
     :param img_content: dictionary content of the image.
     :param N: number of instances of the given color to search for.
     :param color: color to count the instances of.
-    :return:
+    :return: respects rule, is_excluded (no exclusion criteria)
     """
     obj = PatImgObj({"content": img_content, "division": (x_division, y_division), "path": None, "size": None})
-    return len(obj.get_symbols_by(color=color)) == N
+    return len(obj.get_symbols_by(color=color)) == N, False
 
 def generic_rule_shape_color_plus_shape_equals_N(img_content, shape1, color1, shape2, N, x_division, y_division):
     """
@@ -254,10 +261,10 @@ def generic_rule_shape_color_plus_shape_equals_N(img_content, shape1, color1, sh
     :param N: integer value to compare the sum with.
     :param x_division: number of x divisions.
     :param y_division: number of y divisions.
-    :return:
+    :return: respects rule, is_excluded (no exclusion criteria)
     """
     obj = PatImgObj({"content": img_content, "division": (x_division, y_division), "path": None, "size": None})
-    return len(obj.get_symbols_by(shape=shape1, color=color1)) + len(obj.get_symbols_by(shape=shape2)) == N
+    return len(obj.get_symbols_by(shape=shape1, color=color1)) + len(obj.get_symbols_by(shape=shape2)) == N, False
 
 def generic_rule_shape_color_times_2_shape_equals_shape(img_content, shape1, color1, shape2, x_division, y_division):
     """
@@ -270,10 +277,11 @@ def generic_rule_shape_color_times_2_shape_equals_shape(img_content, shape1, col
     :param shape2: shape of the second element to count.
     :param x_division: number of x divisions.
     :param y_division: number of y divisions.
-    :return:
+    :return: respects rule, is_excluded (no exclusion criteria)
     """
     obj = PatImgObj({"content": img_content, "division": (x_division, y_division), "path": None, "size": None})
-    return len(obj.get_symbols_by(shape=shape1, color=color1)) * 2 == len(obj.get_symbols_by(shape=shape2))
+    return len(obj.get_symbols_by(shape=shape1, color=color1)) * 2 == len(obj.get_symbols_by(shape=shape2)), False
+
 
 def generic_rule_shape_in_every_row(img_content, shape, y_division):
     """
@@ -281,14 +289,39 @@ def generic_rule_shape_in_every_row(img_content, shape, y_division):
     :param img_content: dictionary content of the image.
     :param shape: shape to identify.
     :param y_division: number of y divisions.
-    :return:
+    :return: respects rule, is_excluded (no exclusion criteria)
     """
     _, pattern_count, _ = _extract_rows_with_only_shape_or_color(img_content, y_division, shape=shape)
-    return np.all(pattern_count)
+    return np.all(pattern_count), False
+
+
+def generic_rule_pattern_exactly_1_time_exclude_more(img_content, pattern_content, x_division_full, y_division_full,
+                                                     x_division_pattern, y_division_pattern, consider_rotations=False):
+    """
+    Returns True iff the given pattern (defined as a subimage) appears exactly 1 time in the given full image.
+    Excludes the images where the pattern appears more than once. If consider_rotations is True, the function also
+    searches for left and right rotations of the pattern.
+    :param img_content: dictionary content of the image.
+    :param pattern_content: dictionary content of the pattern to search for
+    :param x_division_full: X division of the full image
+    :param y_division_full: Y division of the full image
+    :param x_division_pattern: X division of the pattern to search for
+    :param y_division_pattern: Y division of the pattern to search for
+    :param consider_rotations: whether to consider rotations of the pattern when searching (left and right rotations only).
+    :return: respects rule, is_excluded
+    """
+
+    obj = PatImgObj({"content": img_content, "division": (x_division_full, y_division_full), "path": None, "size": None})
+    submatrixes_positions = obj.find_submatrix_positions(pattern_content, (x_division_pattern, y_division_pattern),
+                                                         find_rotations=consider_rotations)
+
+    return len(submatrixes_positions) == 1, len(submatrixes_positions) > 1
+
 
 def create_dataset_generic_rule_extract_sample(db_dir, datasets_dir_path, csv_name_train, csv_name_test, csv_name_valid,
                                                test_size, valid_size, dataset_pos_samples_nb, dataset_neg_samples_nb,
-                                               sample_path, sample_nb_per_class, generic_rule_fun, **kwargs):
+                                               sample_path, sample_nb_per_class, generic_rule_fun, filter_on_dim=None,
+                                               **kwargs):
     """
     Creating a dataset with the given characteristics and following the given generic rule, and extracting a sample
     of positive and negative instances.
@@ -304,6 +337,7 @@ def create_dataset_generic_rule_extract_sample(db_dir, datasets_dir_path, csv_na
     :param sample_path: directory where to save the sample of the dataset.
     :param sample_nb_per_class: size of the sample for each class.
     :param generic_rule_fun: generic rule function that is used to generate the dataset.
+    :param filter_on_dim: if tuple (xdim, ydim), only samples with given dimension will be considered.
     :param kwargs: kwargs to give to the generic rule function.
     :return:
     """
@@ -313,7 +347,7 @@ def create_dataset_generic_rule_extract_sample(db_dir, datasets_dir_path, csv_na
                                  test_size=test_size, valid_size=valid_size,
                                  dataset_pos_samples_nb=dataset_pos_samples_nb,
                                  dataset_neg_samples_nb=dataset_neg_samples_nb,
-                                 rule_fun=generic_rule_fun, **kwargs)
+                                 rule_fun=generic_rule_fun, filter_on_dim=filter_on_dim, **kwargs)
 
     # Sample extraction
     extract_sample_from_dataset(db_dir, datasets_dir_path, csv_name_train, sample_path, sample_nb_per_class,

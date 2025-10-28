@@ -337,7 +337,7 @@ def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_p
 
 def generate_shap_resnet18(db_dir, datasets_dir_path, dataset_filename, model_dir, xai_output_path, yes_pred_img_path,
                            no_pred_img_path, device="cuda:0", n_jobs=-1, dataset_size=None, masker="blur(128,128)",
-                           shap_scale_img_path=None):
+                           shap_scale_img_path=None, max_evals=10000):
     """
     Generating shap explanations for the given model and dataset, which are stored into the model directory.
     :param db_dir: root of the database.
@@ -356,6 +356,7 @@ def generate_shap_resnet18(db_dir, datasets_dir_path, dataset_filename, model_di
     bottom of the generated explanation. Will be ignored if None.
     :param yes_pred_img_path: path to the image that represents the yes prediction.
     :param no_pred_img_path: path to the image that represents the no prediction.
+    :param max_evals: maximum number of evaluation runs to run.
 
     :return: None.
     """
@@ -400,7 +401,7 @@ def generate_shap_resnet18(db_dir, datasets_dir_path, dataset_filename, model_di
     print("Computing shap values")
     explainer = shap.Explainer(predict, masker=masker_f, output_names=["0", "1"])
     shap_values = explainer(
-        Xtr, max_evals=10000, batch_size=50
+        Xtr, max_evals=max_evals, batch_size=50
     )
     min_shap_value = np.min(shap_values.values)
     max_shap_value = np.max(shap_values.values)
