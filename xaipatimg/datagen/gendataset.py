@@ -318,6 +318,26 @@ def generic_rule_pattern_exactly_1_time_exclude_more(img_content, pattern_conten
     return len(submatrixes_positions) == 1, len(submatrixes_positions) > 1
 
 
+def generic_rule_pattern_exactly_N_times(img_content, pattern_content, N, x_division_full, y_division_full,
+                                         x_division_pattern, y_division_pattern):
+    """
+    Returns True iff the given pattern (defined as a subimage) appears exactly N time in the given full image.
+    No exclusion criteria.
+    :param img_content: dictionary content of the image.
+    :param pattern_content: dictionary content of the pattern to search for
+    :param N: integer value to compare the sum with.
+    :param x_division_full: X division of the full image
+    :param y_division_full: Y division of the full image
+    :param x_division_pattern: X division of the pattern to search for
+    :param y_division_pattern: Y division of the pattern to search for
+    """
+
+    obj = PatImgObj({"content": img_content, "division": (x_division_full, y_division_full), "path": None, "size": None})
+    submatrixes_positions = obj.find_submatrix_positions(pattern_content, (x_division_pattern, y_division_pattern))
+
+    return len(submatrixes_positions) == N, False
+
+
 def create_dataset_generic_rule_extract_sample(db_dir, datasets_dir_path, csv_name_train, csv_name_test, csv_name_valid,
                                                test_size, valid_size, dataset_pos_samples_nb, dataset_neg_samples_nb,
                                                sample_path, sample_nb_per_class, generic_rule_fun, filter_on_dim=None,

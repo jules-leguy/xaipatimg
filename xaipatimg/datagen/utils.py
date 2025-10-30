@@ -107,16 +107,22 @@ class PatImgObj:
         self.img_content_arr_shape_color[posx][posy] = ""
 
 
-    def find_submatrix_positions(self, submatrix_content, submatrix_shape, find_rotations=False):
+    def find_submatrix_positions(self, submatrix_content, submatrix_shape, consider_rotations=False, consider_adjacent_switches=False):
         """
         Return the positions where the given content submatrix us found in the full image object.
-        :param submatrix: content of submatrix
+        :param submatrix_content: content of the submatrix
+        :param submatrix_shape: shape of the submatrix
+        :param consider_rotations: whether to consider that a rotation of the pattern is also a match. All the 90°, 180
+         and -90° rotations are searched for.
+        of the pattern are s
+        :param consider_adjacent_switches: if True,
         :return:
         """
 
         def rotate(img_content, x_division, y_division, direction=None):
             """
             Rotating the content of the given image. If direction == 1, rotating right. If direction == -1, rotating left.
+            Direction == 2 corresponds to a 180° rotation (=2 consecutive rotations to the left or right).
             :param img_content:
             :param direction:
             :return:
@@ -128,15 +134,18 @@ class PatImgObj:
                     c["pos"] = [y_division - 1 - c["pos"][1], c["pos"][0]]
                 elif direction == -1:
                     c["pos"] = [c["pos"][1], x_division - 1 - c["pos"][0]]
+                elif direction == 2:
+                    c["pos"] = [x_division - 1 - c["pos"][0], y_division - 1 - c["pos"][1]]
 
             return new_img_content
 
-        # If find_rotations is True, returning the concatenation of indices of the left rotation of the submatrix, the original submatrix and the
-        # right rotation of the submatrix
-        if find_rotations:
+        # If consider_rotations is True, returning the concatenation of indices of the left rotation of the submatrix, the original submatrix, the
+        # right rotation of the submatrix and the 180° rotation of the submatrix.
+        if consider_rotations:
             return (self.find_submatrix_positions(rotate(submatrix_content, submatrix_shape[0], submatrix_shape[1], -1), submatrix_shape)
                     + self.find_submatrix_positions(submatrix_content, submatrix_shape)
-                    + self.find_submatrix_positions(rotate(submatrix_content, submatrix_shape[0], submatrix_shape[1], 1), submatrix_shape))
+                    + self.find_submatrix_positions(rotate(submatrix_content, submatrix_shape[0], submatrix_shape[1], 1), submatrix_shape)
+                    + self.find_submatrix_positions(rotate(submatrix_content, submatrix_shape[0], submatrix_shape[1], 2), submatrix_shape))
 
         # Constructing the submatrix the same way the full matrix is constructed
         submatrix_np = np.full(submatrix_shape, "", dtype="U100")
@@ -149,18 +158,46 @@ class PatImgObj:
 
         for main_idx in range(M - m + 1):
             for main_idy in range(N - n + 1):
-                window_matrix = np.array(self.img_content_arr_shape_color[main_idx:main_idx + m, main_idy:main_idy + n])
 
-                # Replacing every symbol from the window matrix that does not match with the expected symbols with
-                # an empty string. This allows comparing only the explicitly defined symbols of the submatrix. Thus,
-                # non defined symbols of the submatrix can be matched with any symbols of the window matrix.
-                for sub_idx in range(m):
-                    for sub_idy in range(n):
-                        if window_matrix[sub_idx][sub_idy] != submatrix_np[sub_idx][sub_idy]:
-                            window_matrix[sub_idx][sub_idy] = ""
+                og_window_matrix = np.array(self.img_content_arr_shape_color[main_idx:main_idx + m, main_idy:main_idy + n])
+                window_matrices = [og_window_matrix]
 
-                if np.array_equal(window_matrix, submatrix_np):
-                    positions.append((main_idx, main_idy))
+                if consider_adjacent_switches:
+                    pass
+                #     for cell_x in range(m):
+                #         for cell_y in range(n):
+                #
+                #             def is_exchange_valid(idx1, idy1, idx2, idy2):
+                #                 """
+                #                 Making sure that both cells are defined, both cells are on the same line or the same
+                #                 column, and both cells contain a symbol
+                #                 :return:
+                #                 """
+                #                 return ((idx1 >=0 and idx2 >=0 and idx1 < M and idx2 < M and
+                #                     idy1 >=0 and idy2 >=0 and idy1 < N and idy2 < N)
+                #                         and (idx1 == idx2 or idy1 == idy2)
+                #                         and self.img_content_arr_shape_color[idx1][idy1]
+                #                         and self.img_content_arr_shape_color[idx2][idy2])
+                #
+                #             for offset_x in [-1, 1]:
+                #                 for offset_y in [-1, 1]:
+
+
+                else:
+                    window_matrices = [og_window_matrix]
+
+                for window_matrix in window_matrices:
+
+                    # Replacing every symbol from the window matrix that does not match with the expected symbols with
+                    # an empty string. This allows comparing only the explicitly defined symbols of the submatrix. Thus,
+                    # non defined symbols of the submatrix can be matched with any symbols of the window matrix.
+                    for sub_idx in range(m):
+                        for sub_idy in range(n):
+                            if window_matrix[sub_idx][sub_idy] != submatrix_np[sub_idx][sub_idy]:
+                                window_matrix[sub_idx][sub_idy] = ""
+
+                    if np.array_equal(window_matrix, submatrix_np):
+                        positions.append((main_idx, main_idy))
 
         return positions
 
