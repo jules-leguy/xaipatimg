@@ -32,8 +32,29 @@ def draw_triangle(draw, x, y, size, color):
     draw.polygon(points, fill=color, outline=color)
 
 
-def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlight=None, overwrite=False,
-            return_image=False):
+def draw_star(draw, x, y, size, color, points=4, inner_ratio=0.5):
+    """
+    Draws a symmetric star centered at (x, y).
+    Rotating it by 90° (or 360/points * k) will produce the same appearance.
+    """
+    coords = []
+    outer_radius = size*0.55
+    inner_radius = size * inner_ratio
+
+    # For perfect symmetry, start at 45° for 4-point stars
+    angle_offset = -math.pi / 2 if points % 4 == 0 else -math.pi / 2
+
+    for i in range(points * 2):
+        angle = angle_offset + i * math.pi / points
+        radius = outer_radius if i % 2 == 0 else inner_radius
+        px = x + radius * math.cos(angle)
+        py = y + radius * math.sin(angle)
+        coords.append((px, py))
+
+    draw.polygon(coords, fill=color, outline=color)
+
+def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlight=None, draw_coordinates=True,
+            overwrite=False, return_image=False):
     """
     Generate a grid label image, as well as highlighting a feature in the image. 
     :param img_path: path where to save the generated image.
@@ -42,6 +63,7 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
     :param division: tuple that describes the number of horizontal and vertical divisions.
     :param dimension: tuple that describes the size of the image in pixels.
     :param to_highlight: List of (x, y) positions to highlight in the image.
+    :param draw_coordinates: If True, draw coordinates on the image.
     :param overwrite: whether to overwrite existing images. If False, no action will be taken if the image already exists.
     :param return_image : whether to return the generated image
     :return: None
@@ -90,27 +112,28 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
         y1 = y0
         draw.line([(x0, y0), (x1, y1)], fill="black", width=1)
 
-    # draw labels
-    try:
-        font = ImageFont.truetype(
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", font_size)
-    except IOError:
-        print("Warning: LiberationSans-Regular.ttf not found. Falling back to the default font.")
-        font = ImageFont.load_default(size=font_size)
+    if draw_coordinates:
+        # draw labels
+        try:
+            font = ImageFont.truetype(
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", font_size)
+        except IOError:
+            print("Warning: LiberationSans-Regular.ttf not found. Falling back to the default font.")
+            font = ImageFont.load_default(size=font_size)
 
-    # Columns: A, B, C, …
-    for col in range(division[0]):
-        label = chr(ord('A') + col)
-        x = grid_origin_x + (col + 0.5) * cell_width   # column centre
-        y = grid_origin_y - (padding / 2.2)
-        draw.text((x, y), label, fill="gray", font=font, anchor="ms")
+        # Columns: A, B, C, …
+        for col in range(division[0]):
+            label = chr(ord('A') + col)
+            x = grid_origin_x + (col + 0.5) * cell_width   # column centre
+            y = grid_origin_y - (padding / 2.2)
+            draw.text((x, y), label, fill="gray", font=font, anchor="ms")
 
-    # Rows: 1, 2, 3, …
-    for row in range(division[1]):
-        label = str(row + 1)
-        x = grid_origin_x - (padding / 2.2)
-        y = grid_origin_y + (row + 0.5) * cell_height   # row centre
-        draw.text((x, y), label, fill="gray", font=font, anchor="rm")
+        # Rows: 1, 2, 3, …
+        for row in range(division[1]):
+            label = str(row + 1)
+            x = grid_origin_x - (padding / 2.2)
+            y = grid_origin_y + (row + 0.5) * cell_height   # row centre
+            draw.text((x, y), label, fill="gray", font=font, anchor="rm")
 
     # Define shape size
     shape_size = 0.7 * min(cell_width, cell_height)
@@ -134,7 +157,9 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
             draw_square(draw, x_center, y_center, shape_size / 2, color)
         elif shape == 'triangle':
             draw_triangle(draw, x_center, y_center, shape_size, color)
-            
+        elif shape == 'star':
+            draw_star(draw, x_center, y_center, shape_size, color, points=8, inner_ratio=0.25)
+
     #integrating code by adding highlighting the symbols
     highlight_margin = 0.15 * shape_size
     for (x, y) in to_highlight:
@@ -156,13 +181,14 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
     return None
 
 
-def gen_img_and_save_db(db, db_dir, overwrite=False, n_jobs=1):
+def gen_img_and_save_db(db, db_dir, overwrite=False, draw_coordinates=True, n_jobs=1):
     """
     Generate every image from the DB.
     :param db_dir: path to the root of the DB
     :param db: database of image information and location
     :param overwrite: whether to overwrite existing images. If False, the images that already exist in the filesystem
     are ignored by this function.
+    :param draw_coordinates: If True, draw coordinates on the image.
     :param n_jobs: number of jobs to run in parallel.
     :return:
     """
@@ -172,5 +198,9 @@ def gen_img_and_save_db(db, db_dir, overwrite=False, n_jobs=1):
     Parallel(n_jobs=n_jobs)(delayed(gen_img)(os.path.join(db_dir, img_data_list[i]["path"]),
                                              img_data_list[i]["content"],
                                              img_data_list[i]["division"], img_data_list[i]["size"],
-                                             None, overwrite, False) for i in tqdm.tqdm(range(len(img_data_list))))
+                                             None, # to_highlight
+                                             draw_coordinates, # draw_coordinates
+                                             overwrite, # overwrite
+                                             False # return_image
+                                             ) for i in tqdm.tqdm(range(len(img_data_list))))
     save_db(db=db, db_dir=db_dir)

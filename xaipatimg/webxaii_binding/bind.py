@@ -5,7 +5,6 @@ import random
 import shutil
 
 import numpy as np
-from sklearn.model_selection import train_test_split
 
 def _create_task_desc_json(res_dir, name, question):
     """
