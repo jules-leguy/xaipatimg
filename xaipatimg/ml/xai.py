@@ -651,6 +651,14 @@ def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_di
     :return:
     """
 
+    def custom_sort(a):
+        """
+        Custom function to sort dict elements row first then columns
+        :param a:
+        :return:
+        """
+        return a["pos"][1], a["pos"][0]
+
     # Function that converts the dict image content to an equivalent with explicit color names and using the
     # (A..F)(1..6) coordinates notation
     def convert_content(img_content, explicit_colors_dict):
@@ -668,6 +676,10 @@ def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_di
             new_shape_content["pos"] = new_coord
             new_shape_content["color"] = explicit_colors_dict[shape_content["color"]]
             new_content.append(new_shape_content)
+
+        # Sorting the elements row-first
+        new_content = sorted(new_content, key=custom_sort)
+
         return new_content
 
     system_prompt = (f"You are the explainability system of an AI model. Your role is to justify the decisions of "
@@ -678,10 +690,11 @@ def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_di
                      f"JSON data. You need to give an explanation of the prediction. The explanation must be as "
                      f"short as possible, and must refer explicitly to coordinates of the symbols, whenever "
                      f"applicable. When listing coordinates, list all elements in increasing order of rows (all elements"
-                     f"of row 1 then all elements of row 2, etc). Use line breaks if the list contains up to 10 elements. "
+                     f"of row 1 then all elements of row 2, etc). Use line breaks whenever possible but make sure the "
+                     f"generated explanation contains 13 lines at most. "
                      f"Do not use escape characters or markdown syntax. Each explanation must start with 'The AI "
                      f"predicts |YES| because' if the prediction is Yes or"
-                     f"'The AI predicts |NO| because' if the prediction is No. The question that the model must answer to "
+                     f"The AI predicts |NO| because' if the prediction is No. The question that the model must answer to "
                      f"is '{question}'. Here are examples of justifications for a positive and a negative sample. "
                      f"Positive : '{pos_llm_scaffold}' Negative : '{neg_llm_scaffold}'")
 
@@ -709,7 +722,7 @@ def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_di
     ).to(llm_model.device)
 
     # Performing LLM computation
-    generated = llm_model.generate(**inputs, max_new_tokens=2000)
+    generated = llm_model.generate(**inputs, max_new_tokens=3000)
 
     # Parsing LLM answer
     full_answer = tokenizer.decode(generated[0][inputs["input_ids"].shape[-1]:])
@@ -778,7 +791,7 @@ def generate_LLM_explanations(db_dir, db, datasets_dir_path, dataset_filename, m
                                           output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5)
 
         output_img_AIonly_path = os.path.join(xai_output_path, str(sample_idx) + "AIonly.png")
-        _generate_displayable_explanation(y_pred, None, yes_pred_img_path, no_pred_img_path,
+        _generate_displayable_explanation(y_pred[sample_idx], None, yes_pred_img_path, no_pred_img_path,
                                           output_img_AIonly_path,
                                           output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5,
                                           AI_only=True)
