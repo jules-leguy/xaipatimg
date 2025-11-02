@@ -581,7 +581,8 @@ def _cf_single_sample_random_approach(db_dir, datasets_dir_path, sample_idx, xai
             # Verifying that the generated sample is an actual counterfactual to generic rule function (differs from the
             # model counterfactual if the model makes the wrong prediction for the sample).
             if rule_cf_found_dict is None:
-                y_cf = int(generic_rule_fun(mutations_dict_list[y_pred_model_cf_idx]["content"], **kwargs))
+                gen_fun_return, _ = generic_rule_fun(mutations_dict_list[y_pred_model_cf_idx]["content"], **kwargs)
+                y_cf = int(gen_fun_return)
                 if y_cf != y:
                     rule_cf_found_dict = mutations_dict_list[y_pred_model_cf_idx]
                     rule_cf_found_depth = curr_depth
