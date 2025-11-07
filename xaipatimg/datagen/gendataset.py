@@ -313,7 +313,7 @@ def generic_rule_pattern_exactly_1_time_exclude_more(img_content, pattern_conten
 
     obj = PatImgObj({"content": img_content, "division": (x_division_full, y_division_full), "path": None, "size": None})
     submatrixes_positions = obj.find_submatrix_positions(pattern_content, (x_division_pattern, y_division_pattern),
-                                                         find_rotations=consider_rotations)
+                                                         consider_rotations=consider_rotations)
 
     return len(submatrixes_positions) == 1, len(submatrixes_positions) > 1
 
