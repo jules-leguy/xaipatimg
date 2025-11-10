@@ -6,22 +6,13 @@ import os
 import tqdm
 from joblib import Parallel, delayed
 
-# Function to draw a circle
-
-
 def draw_circle(draw, x, y, size, color):
     draw.ellipse([x - size*0.8, y - size*0.8, x + size*0.8,
                  y + size*0.8], fill=color, outline=color)
 
-# Function to draw a square
-
-
 def draw_square(draw, x, y, size, color):
     draw.rectangle([x - size*0.7, y - size*0.7, x + size*0.7,
                    y + size*0.7], fill=color, outline=color)
-
-# Function to draw a triangle
-
 
 def draw_triangle(draw, x, y, size, color):
     half_size = size*0.8 / 2
@@ -31,6 +22,29 @@ def draw_triangle(draw, x, y, size, color):
               (x + half_size, y + height / 2)]
     draw.polygon(points, fill=color, outline=color)
 
+def draw_cross(draw, x, y, size, color):
+    # Thickness of the cross arms as a fraction of total size
+    arm = size * 0.3
+    half = size / 2
+    half_arm = arm / 2
+
+    # The cross is made of 12 points forming a “+” shape
+    points = [
+        (x - half_arm, y - half),     # top arm left
+        (x + half_arm, y - half),     # top arm right
+        (x + half_arm, y - half_arm), # upper right intersection
+        (x + half,     y - half_arm), # right arm upper
+        (x + half,     y + half_arm), # right arm lower
+        (x + half_arm, y + half_arm), # lower right intersection
+        (x + half_arm, y + half),     # bottom arm right
+        (x - half_arm, y + half),     # bottom arm left
+        (x - half_arm, y + half_arm), # lower left intersection
+        (x - half,     y + half_arm), # left arm lower
+        (x - half,     y - half_arm), # left arm upper
+        (x - half_arm, y - half_arm)  # upper left intersection
+    ]
+
+    draw.polygon(points, fill=color, outline=color)
 
 def draw_star(draw, x, y, size, color, points=4, inner_ratio=0.5):
     """
@@ -157,9 +171,10 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
             draw_square(draw, x_center, y_center, shape_size / 2, color)
         elif shape == 'triangle':
             draw_triangle(draw, x_center, y_center, shape_size, color)
+        elif shape == 'cross':
+            draw_cross(draw, x_center, y_center, shape_size, color)
         elif shape == 'star':
             draw_star(draw, x_center, y_center, shape_size, color, points=8, inner_ratio=0.25)
-
     #integrating code by adding highlighting the symbols
     highlight_margin = 0.15 * shape_size
     for (x, y) in to_highlight:

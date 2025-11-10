@@ -107,15 +107,14 @@ class PatImgObj:
         self.img_content_arr_shape_color[posx][posy] = ""
 
 
-    def find_submatrix_positions(self, submatrix_content, submatrix_shape, consider_rotations=False, consider_adjacent_switches=False):
+    def find_submatrix_positions(self, submatrix_content, submatrix_shape, consider_rotations=False):
         """
         Return the positions where the given content submatrix us found in the full image object.
         :param submatrix_content: content of the submatrix
         :param submatrix_shape: shape of the submatrix
-        :param consider_rotations: whether to consider that a rotation of the pattern is also a match. All the 90°, 180
-         and -90° rotations are searched for.
+        :param consider_rotations: whether to consider that a 90° rotation or a -90° rotation of the pattern is also a
+        match.
         of the pattern are s
-        :param consider_adjacent_switches: if True,
         :return:
         """
 
@@ -144,8 +143,8 @@ class PatImgObj:
         if consider_rotations:
             return (self.find_submatrix_positions(rotate(submatrix_content, submatrix_shape[0], submatrix_shape[1], -1), submatrix_shape)
                     + self.find_submatrix_positions(submatrix_content, submatrix_shape)
-                    + self.find_submatrix_positions(rotate(submatrix_content, submatrix_shape[0], submatrix_shape[1], 1), submatrix_shape)
-                    + self.find_submatrix_positions(rotate(submatrix_content, submatrix_shape[0], submatrix_shape[1], 2), submatrix_shape))
+                    + self.find_submatrix_positions(rotate(submatrix_content, submatrix_shape[0], submatrix_shape[1], 1), submatrix_shape))
+                    # + self.find_submatrix_positions(rotate(submatrix_content, submatrix_shape[0], submatrix_shape[1], 2), submatrix_shape))
 
         # Constructing the submatrix the same way the full matrix is constructed
         submatrix_np = np.full(submatrix_shape, "", dtype="U100")
@@ -159,45 +158,18 @@ class PatImgObj:
         for main_idx in range(M - m + 1):
             for main_idy in range(N - n + 1):
 
-                og_window_matrix = np.array(self.img_content_arr_shape_color[main_idx:main_idx + m, main_idy:main_idy + n])
-                window_matrices = [og_window_matrix]
+                window_matrix = np.array(self.img_content_arr_shape_color[main_idx:main_idx + m, main_idy:main_idy + n])
 
-                if consider_adjacent_switches:
-                    pass
-                #     for cell_x in range(m):
-                #         for cell_y in range(n):
-                #
-                #             def is_exchange_valid(idx1, idy1, idx2, idy2):
-                #                 """
-                #                 Making sure that both cells are defined, both cells are on the same line or the same
-                #                 column, and both cells contain a symbol
-                #                 :return:
-                #                 """
-                #                 return ((idx1 >=0 and idx2 >=0 and idx1 < M and idx2 < M and
-                #                     idy1 >=0 and idy2 >=0 and idy1 < N and idy2 < N)
-                #                         and (idx1 == idx2 or idy1 == idy2)
-                #                         and self.img_content_arr_shape_color[idx1][idy1]
-                #                         and self.img_content_arr_shape_color[idx2][idy2])
-                #
-                #             for offset_x in [-1, 1]:
-                #                 for offset_y in [-1, 1]:
+                # Replacing every symbol from the window matrix that does not match with the expected symbols with
+                # an empty string. This allows comparing only the explicitly defined symbols of the submatrix. Thus,
+                # non defined symbols of the submatrix can be matched with any symbols of the window matrix.
+                for sub_idx in range(m):
+                    for sub_idy in range(n):
+                        if window_matrix[sub_idx][sub_idy] != submatrix_np[sub_idx][sub_idy]:
+                            window_matrix[sub_idx][sub_idy] = ""
 
-
-                else:
-                    window_matrices = [og_window_matrix]
-
-                for window_matrix in window_matrices:
-
-                    # Replacing every symbol from the window matrix that does not match with the expected symbols with
-                    # an empty string. This allows comparing only the explicitly defined symbols of the submatrix. Thus,
-                    # non defined symbols of the submatrix can be matched with any symbols of the window matrix.
-                    for sub_idx in range(m):
-                        for sub_idy in range(n):
-                            if window_matrix[sub_idx][sub_idy] != submatrix_np[sub_idx][sub_idy]:
-                                window_matrix[sub_idx][sub_idy] = ""
-
-                    if np.array_equal(window_matrix, submatrix_np):
-                        positions.append((main_idx, main_idy))
+                if np.array_equal(window_matrix, submatrix_np):
+                    positions.append((main_idx, main_idy))
 
         return positions
 

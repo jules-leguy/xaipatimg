@@ -282,6 +282,18 @@ def generic_rule_shape_color_times_2_shape_equals_shape(img_content, shape1, col
     obj = PatImgObj({"content": img_content, "division": (x_division, y_division), "path": None, "size": None})
     return len(obj.get_symbols_by(shape=shape1, color=color1)) * 2 == len(obj.get_symbols_by(shape=shape2)), False
 
+def generic_rule_shape_color_even(img_content, color, shape, x_division, y_division):
+    """
+    Return true iff the number of symbols of the given color and shape is evnen
+    :param img_content: dictionary content of the image.
+    :param color: color
+    :param shape: shape
+    :param x_division: number of x divisions.
+    :param y_division: number of y divisions.
+    :return: is_excluded (no exclusion criteria)
+    """
+    obj = PatImgObj({"content": img_content, "division": (x_division, y_division), "path": None, "size": None})
+    return len(obj.get_symbols_by(shape=shape, color=color)) % 2 == 0, False
 
 def generic_rule_shape_in_every_row(img_content, shape, y_division):
     """
