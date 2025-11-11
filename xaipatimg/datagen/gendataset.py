@@ -250,6 +250,26 @@ def generic_rule_N_times_color_exactly(img_content, N, color, x_division, y_divi
     obj = PatImgObj({"content": img_content, "division": (x_division, y_division), "path": None, "size": None})
     return len(obj.get_symbols_by(color=color)) == N, False
 
+def generic_rule_N_times_color_shape_exactly(img_content, N, color, shape, x_division, y_division,
+                                             restrict_plus_minus_1=False):
+    """
+    Returns True iff there is exactly N times the symbol with given color and shape in the image.
+    :param img_content: dictionary content of the image.
+    :param N: number of instances of the given color to search for.
+    :param color: color of the symbol to count the instances of.
+    :param shape: shape of the symbol to count the instances of.
+    :param x_division: number of x divisions.
+    :param y_division: number of y divisions.
+    :param restrict_plus_minus_1: If true, an exclusion criteria is applied which only includes images which contain
+    [N-1, N+1] symbols of the given color and shape.
+    :return: respects rule, is_excluded
+    """
+    obj = PatImgObj({"content": img_content, "division": (x_division, y_division), "path": None, "size": None})
+
+    count = len(obj.get_symbols_by(color=color, shape=shape))
+    exclusion = (count < N - 1 or count > N + 1) if restrict_plus_minus_1 else False
+    return  count == N, exclusion
+
 def generic_rule_shape_color_plus_shape_equals_N(img_content, shape1, color1, shape2, N, x_division, y_division):
     """
     Return true iff the number of instances of the given color and shape plus the number of instances of the given
