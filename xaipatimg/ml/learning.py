@@ -172,10 +172,11 @@ def _check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, c
         return False, counter, best_loss
 
 
-def train_resnet18_model(db_dir, datasets_dir_path, train_dataset_filename, valid_dataset_filename,
+def train_resnet_model(db_dir, datasets_dir_path, train_dataset_filename, valid_dataset_filename,
                          model_dir, device="cuda:0", training_epochs=90, lr=0.1, momentum=0.9, weight_decay=1e-4,
                          batch_size=32, lr_step_size=30, lr_gamma=0.1, train_loss_write_period_logs=100,
-                         target_accuracy=1.0, training_mode="batch", patience=None, interval_batch=200):
+                         target_accuracy=1.0, training_mode="batch", patience=None, interval_batch=200,
+                         resnet_type="resnet18"):
     """
     Perform the training of the given model.
     The default hyper-parameters correspond to the ones that were used to train ResNet18 model. The stochastic
@@ -202,6 +203,7 @@ def train_resnet18_model(db_dir, datasets_dir_path, train_dataset_filename, vali
                          'batch' for validation at every interval batches.
     :param patience: the number of times in a row that the validation loss does not improve before training is stopped early.
     :param interval_batch: number of batches between each validation
+    :param resnet_type: either "resnet18" or "resnet50"
     :return:
     """
     os.makedirs(model_dir, exist_ok=True)
@@ -223,10 +225,21 @@ def train_resnet18_model(db_dir, datasets_dir_path, train_dataset_filename, vali
     training_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
     valid_loader = torch.utils.data.DataLoader(dataset_valid, batch_size=batch_size, shuffle=False)
 
-    model = torch.hub.load('pytorch/vision:v0.10.0',
-                           'resnet18', pretrained=False)
-    model.fc = Linear(512, 2)
-    model = model.to(device)
+    if resnet_type == "resnet18":
+        model = torch.hub.load('pytorch/vision:v0.10.0',
+                               'resnet18', pretrained=False)
+        model.fc = Linear(512, 2)
+        model = model.to(device)
+
+    elif resnet_type == "resnet50":
+
+        model = torch.hub.load('pytorch/vision:v0.10.0',
+                               'resnet50', pretrained=False)
+        model.fc = Linear(2048, 2)
+        model = model.to(device)
+
+    else:
+        raise ValueError(f"Unknown resnet type {resnet_type}")
 
     optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
     loss_fn = torch.nn.CrossEntropyLoss()
@@ -376,16 +389,26 @@ def _compute_scores(data_loader, model, device):
         }
     }
 
-def load_resnet18_based_model(model_dir, device):
+def load_resnet_based_model(model_dir, device, resnet_type="resnet18"):
     """
     Creating a resnet18 model with two output features and loading the weights from the model stored in the given
     directory.
     :param model_dir: path to model directory (contains a file called final_model).
     :param device: device on which to run the model.
+    :param resnet_type: Either "resnet18" or "resnet50".
     :return: the model.
     """
-    model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=False)
-    model.fc = Linear(in_features=512, out_features=2, bias=True)
+
+    if resnet_type == "resnet18":
+        model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=False)
+        model.fc = Linear(in_features=512, out_features=2, bias=True)
+
+    elif resnet_type == "resnet50":
+        model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet50', pretrained=False)
+        model.fc = Linear(in_features=2048, out_features=2, bias=True)
+
+    else:
+        raise ValueError(f"Unknown resnet type {resnet_type}")
 
     model.load_state_dict(torch.load(os.path.join(model_dir, "final_model"), weights_only=True, map_location=device))
     model.eval()
@@ -419,8 +442,8 @@ def get_dataset_transformed(db_dir, datasets_dir_path, model_dir, dataset_filena
     return PatImgDataset(db_dir, datasets_dir_path, dataset_filename, transform=preprocess, max_size=max_size)
 
 
-def compute_resnet18_model_scores(db_dir, datasets_dir_path, train_dataset_filename, test_dataset_filename,
-                                  valid_dataset_filename, model_dir, device="cuda:0"):
+def compute_resnet_model_scores(db_dir, datasets_dir_path, train_dataset_filename, test_dataset_filename,
+                                  valid_dataset_filename, model_dir, device="cuda:0", resnet_type="resnet18"):
     """
     Computes and writes the scores of the given model into a file in the model directory. The scores are evaluated
     on the training, validation and test sets.
@@ -431,6 +454,7 @@ def compute_resnet18_model_scores(db_dir, datasets_dir_path, train_dataset_filen
     :param valid_dataset_filename: filename of the csv validation dataset file.
     :param model_dir: path to the directory of the model.
     :param device: device where to perform the computations.
+    :param resnet_type: either "resnet18" or "resnet50".
     :return:
     """
 
@@ -443,7 +467,7 @@ def compute_resnet18_model_scores(db_dir, datasets_dir_path, train_dataset_filen
     valid_loader = torch.utils.data.DataLoader(dataset_valid, batch_size=100, shuffle=False)
 
     # Loading the model
-    model = load_resnet18_based_model(model_dir, device)
+    model = load_resnet_based_model(model_dir, device, resnet_type=resnet_type)
 
     # Computing the scores
     results = {
@@ -461,7 +485,7 @@ def compute_resnet18_model_scores(db_dir, datasets_dir_path, train_dataset_filen
 
 
 def save_classification(db_dir, datasets_dir_path, test_dataset_filename, model_dir, classification_dir,
-                        device="cuda:0", max_items=None):
+                        device="cuda:0", max_items=None, resnet_type="resnet18"):
     from xaipatimg.ml.xai import _create_dirs, _get_subfolder
     """
     Copy every image listed in test dataset into TP / TN / FP / FN folders to observer what the model got right or wrong.
@@ -481,7 +505,7 @@ def save_classification(db_dir, datasets_dir_path, test_dataset_filename, model_
     _create_dirs(classification_dir)
 
     # Load model and dataset
-    model = load_resnet18_based_model(model_dir, device)
+    model = load_resnet_based_model(model_dir, device, resnet_type=resnet_type)
     model.eval()
 
     dataset = get_dataset_transformed(

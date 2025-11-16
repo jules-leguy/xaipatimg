@@ -21,7 +21,7 @@ from xaipatimg.datagen.genimg import gen_img
 from xaipatimg.datagen.utils import get_coords_diff, PatImgObj, random_mutation
 from xaipatimg.ml import resnet18_preprocess_no_norm
 from xaipatimg.ml._colors import red_transparent_green
-from xaipatimg.ml.learning import load_resnet18_based_model, get_dataset_transformed, make_prediction
+from xaipatimg.ml.learning import get_dataset_transformed, make_prediction, load_resnet_based_model
 import numpy as np
 import io
 from xaipatimg.ml.utils import nhwc_to_nchw, nchw_to_nhwc, add_margin, crop_white_border, add_border, \
@@ -40,7 +40,7 @@ def _create_dirs(xai_output_path):
     os.makedirs(xai_output_path, exist_ok=True)
 
 
-def _predict(model_dir, device, dataset):
+def _predict(model_dir, device, dataset, resnet_type):
     """
     Utility function to make predictions with the given model on the given dataset
     :param model_dir: path of the model directory.
@@ -48,7 +48,7 @@ def _predict(model_dir, device, dataset):
     :param dataset: dataset as a PatImgDataset instance.
     :return: The input X and y matrices, the predicted y_pred vector and the model : X, y, y_pred, model
     """
-    model = load_resnet18_based_model(model_dir, device)
+    model = load_resnet_based_model(model_dir, device, resnet_type=resnet_type)
     X = np.array([dataset[i][0] for i in range(len(dataset))])
     y = np.array([dataset[i][1] for i in range(len(dataset))])
     input_tensor = torch.from_numpy(X)
@@ -335,9 +335,9 @@ def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_p
                                       output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5, AI_only=True)
 
 
-def generate_shap_resnet18(db_dir, datasets_dir_path, dataset_filename, model_dir, xai_output_path, yes_pred_img_path,
+def generate_shap_resnet(db_dir, datasets_dir_path, dataset_filename, model_dir, xai_output_path, yes_pred_img_path,
                            no_pred_img_path, device="cuda:0", n_jobs=-1, dataset_size=None, masker="blur(128,128)",
-                           shap_scale_img_path=None, max_evals=10000):
+                           shap_scale_img_path=None, max_evals=10000, resnet_type="resnet18"):
     """
     Generating shap explanations for the given model and dataset, which are stored into the model directory.
     :param db_dir: root of the database.
@@ -357,7 +357,7 @@ def generate_shap_resnet18(db_dir, datasets_dir_path, dataset_filename, model_di
     :param yes_pred_img_path: path to the image that represents the yes prediction.
     :param no_pred_img_path: path to the image that represents the no prediction.
     :param max_evals: maximum number of evaluation runs to run.
-
+    :param resnet_type: type of resnet model to use (either "resnet18" or "resnet50").
     :return: None.
     """
 
@@ -368,7 +368,7 @@ def generate_shap_resnet18(db_dir, datasets_dir_path, dataset_filename, model_di
     dataset = get_dataset_transformed(db_dir, datasets_dir_path, model_dir, dataset_filename, max_size=dataset_size)
 
     # Make prediction
-    X, _, y_pred, model = _predict(model_dir, device, dataset)
+    X, _, y_pred, model = _predict(model_dir, device, dataset, resnet_type=resnet_type)
 
     Xtr = nchw_to_nhwc(torch.from_numpy(X))
 
@@ -414,11 +414,12 @@ def generate_shap_resnet18(db_dir, datasets_dir_path, dataset_filename, model_di
         yes_pred_img_path, no_pred_img_path) for i in tqdm.tqdm(range(len(X))))
 
 
-def generate_counterfactuals_resnet18_random_approach(db_dir, datasets_dir_path, dataset_filename, model_dir,
+def generate_counterfactuals_resnet_random_approach(db_dir, datasets_dir_path, dataset_filename, model_dir,
                                                       xai_output_path, yes_pred_img_path, no_pred_img_path, shapes,
                                                       colors, empty_probability, max_depth, nb_tries_per_depth,
                                                       generic_rule_fun, devices, n_jobs=-1, dataset_size=None,
-                                                      pos_pred_legend_path=None, neg_pred_legend_path=None, **kwargs):
+                                                      pos_pred_legend_path=None, neg_pred_legend_path=None,
+                                                      resnet_type="resnet18", **kwargs):
     """
     Generating counterfactual explanations for the given model and dataset. Explanations are obtained by assessing
     randomly mutated images. A mutation consists in randomly changing the content of a cell of the image.
@@ -449,6 +450,7 @@ def generate_counterfactuals_resnet18_random_approach(db_dir, datasets_dir_path,
     :param empty_probability: probability of an empty cell.
     :param pos_pred_legend_path: path to the legend when the prediction is positive.
     :param neg_pred_legend_path: path to the legend when the prediction is negative.
+    :param resnet_type: 'resnet18' or 'resnet50'.
     :return: None.
     """
 
@@ -459,7 +461,7 @@ def generate_counterfactuals_resnet18_random_approach(db_dir, datasets_dir_path,
     dataset = get_dataset_transformed(db_dir, datasets_dir_path, model_dir, dataset_filename, max_size=dataset_size)
 
     # Make prediction
-    X, y, y_pred, model = _predict(model_dir, devices[0], dataset)
+    X, y, y_pred, model = _predict(model_dir, devices[0], dataset, resnet_type=resnet_type)
 
     # Load database
     db = load_db(db_dir)
@@ -506,7 +508,7 @@ def _cf_single_sample_random_approach(db_dir, datasets_dir_path, sample_idx, xai
                                       model_dir, device, max_depth, nb_tries_per_depth, shapes, colors,
                                       empty_probability, generic_rule_fun, yes_pred_img_path, no_pred_img_path,
                                       pos_pred_legend_path=None,
-                                      neg_pred_legend_path=None, **kwargs):
+                                      neg_pred_legend_path=None, resnet_type="resnet18", **kwargs):
     """
     Generating a set of counterfactual explanations for a single sample with the random approach.
     Generating a counterfactual to the model as well as a counterfactual to the actual sample according to the generic
@@ -529,6 +531,7 @@ def _cf_single_sample_random_approach(db_dir, datasets_dir_path, sample_idx, xai
     :param no_pred_img_path: path to the image that represents the no prediction.
     :param pos_pred_legend_path: path to the legend when the prediction is positive.
     :param neg_pred_legend_path: path to the legend when the prediction is negative.
+    :param resnet_type: 'resnet18' or 'resnet50'.
     :return: None
     """
 
@@ -570,7 +573,7 @@ def _cf_single_sample_random_approach(db_dir, datasets_dir_path, sample_idx, xai
 
         # Verifying that the generated samples are counterfactuals to the model or to the rule function
         dataset = get_dataset_transformed(db_dir, datasets_dir_path, model_dir, dataset_path)
-        _, _, y_pred_model_cf, _ = _predict(model_dir, device, dataset)
+        _, _, y_pred_model_cf, _ = _predict(model_dir, device, dataset, resnet_type=resnet_type)
         for y_pred_model_cf_idx, y_pred_curr_cf in enumerate(y_pred_model_cf):
 
             # Verifying that the generated sample is an actual counterfactual to the model (exclusive or)
@@ -737,7 +740,7 @@ def generate_LLM_explanations(db_dir, db, datasets_dir_path, dataset_filename, m
                               xai_output_path, explicit_colors_dict, question, yes_pred_img_path, no_pred_img_path,
                               yes_pred_img_path_small, no_pred_img_path_small, pos_llm_scaffold, neg_llm_scaffold,
                               device="cuda:0", dataset_size=None, only_for_index=None,
-                              path_to_counterfactuals_dir_for_model_errors=None):
+                              path_to_counterfactuals_dir_for_model_errors=None, resnet_type="resnet18"):
     """
     Generating LLM explanations for the given model and dataset.
     :param db_dir: root of the database.
@@ -763,6 +766,7 @@ def generate_LLM_explanations(db_dir, db, datasets_dir_path, dataset_filename, m
     :param path_to_counterfactuals_dir_for_model_errors: If not None, when the model makes the wrong prediction, the
     counterfactual explanation generated for the sample will be used instead of the actual sample to generate the
     LLM explanation. This allows generating an explanation which is consistent with the model prediction.
+    :param resnet_type: type of resnet model to use (either "resnet18" or "resnet50").
     :return:
     """
     # Creating directories
@@ -773,7 +777,7 @@ def generate_LLM_explanations(db_dir, db, datasets_dir_path, dataset_filename, m
     dataset = get_dataset_transformed(db_dir, datasets_dir_path, model_dir, dataset_filename, max_size=dataset_size)
 
     # Make prediction
-    X, y, y_pred, _ = _predict(model_dir, device, dataset)
+    X, y, y_pred, _ = _predict(model_dir, device, dataset, resnet_type=resnet_type)
 
     index_list = range(len(X)) if only_for_index is None else only_for_index
     for sample_idx in tqdm.tqdm(index_list):
@@ -799,7 +803,8 @@ def generate_LLM_explanations(db_dir, db, datasets_dir_path, dataset_filename, m
                                           AI_only=True)
 
 
-def create_xai_index(db_dir, datasets_dir_path, dataset_filename, model_dir, xai_dirs, dataset_size, device):
+def create_xai_index(db_dir, datasets_dir_path, dataset_filename, model_dir, xai_dirs, dataset_size, device,
+                     resnet_type="resnet18"):
     """
     Creating a csv file which contains the information of (dataset index, class, model prediction, path to image, [path to every xai generated image],
     path to the generated image for the prediction only).
@@ -811,6 +816,7 @@ def create_xai_index(db_dir, datasets_dir_path, dataset_filename, model_dir, xai
     :param dataset_size: elements of the dataset are loaded until the size reaches this value. If None, the whole
     dataset is loaded.
     :param device: device to use for pytorch computation.
+    :param resnet_type: type of resnet model to use (either "resnet18" or "resnet50").
     :return:
     """
 
@@ -818,7 +824,7 @@ def create_xai_index(db_dir, datasets_dir_path, dataset_filename, model_dir, xai
     dataset = get_dataset_transformed(db_dir, datasets_dir_path, model_dir, dataset_filename, max_size=dataset_size)
 
     # Make prediction
-    X, y, y_pred, model = _predict(model_dir, device, dataset)
+    X, y, y_pred, model = _predict(model_dir, device, dataset, resnet_type=resnet_type)
 
     csv_data = []
 

@@ -59,6 +59,9 @@ def create_dataset_based_on_rule(db_dir, datasets_dir_path, csv_filename_train, 
                 neg_list.append(img_content["path"])
             neg_nb += 1
 
+        if pos_nb >= dataset_pos_samples_nb and neg_nb >= dataset_neg_samples_nb:
+            break
+
     print("Total number of positive instances found in database : " + str(pos_nb))
     print("Total number of negative instances found in database : " + str(neg_nb))
 
