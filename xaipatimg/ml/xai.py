@@ -488,6 +488,7 @@ def generate_counterfactuals_resnet_random_approach(db_dir, datasets_dir_path, d
         no_pred_img_path,  # no_pred_img_path
         pos_pred_legend_path,  # pos_pred_legend_path
         neg_pred_legend_path,  # neg_pred_legend_path
+        resnet_type, # resnet_type
         **kwargs) for i in tqdm.tqdm(range(len(X))))
 
     cf_depths, cf_verified_depths = zip(*return_values)
