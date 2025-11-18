@@ -1,3 +1,5 @@
+from joblib import Parallel, delayed
+
 from xaipatimg.datagen.dbimg import load_db
 import numpy as np
 import csv
@@ -8,10 +10,9 @@ from sklearn.model_selection import train_test_split
 
 from xaipatimg.datagen.utils import PatImgObj
 
-
 def create_dataset_based_on_rule(db_dir, datasets_dir_path, csv_filename_train, csv_filename_test, csv_filename_valid,
                                  test_size, valid_size, dataset_pos_samples_nb, dataset_neg_samples_nb, rule_fun,
-                                 random_seed=42, filter_on_dim=None, **kwargs):
+                                 random_seed=42, filter_on_dim=None, n_jobs=1, **kwargs):
     """
     Function that creates a training dataset based on the rule that is defined in the rule_fun function. The dataset is
     saved as a csv file and contains a given number of positive and negative samples.
@@ -28,6 +29,7 @@ def create_dataset_based_on_rule(db_dir, datasets_dir_path, csv_filename_train, 
     :param rule_fun: boolean function that defines whether the given image content is positive or negative.
     :param random_seed: seed which is used for dataset random ordering.
     :param filter_on_dim: if tuple (xdim, ydim), only the images with this dimension will be considered.
+    :param n_jobs: number of jobs to run in parallel.
     :return: None
     """
     # Load and shuffle images content
@@ -41,22 +43,29 @@ def create_dataset_based_on_rule(db_dir, datasets_dir_path, csv_filename_train, 
     pos_nb = 0
     neg_nb = 0
 
+    if filter_on_dim is None:
+        filtred_img_content_list = img_content_list
+    else:
+        filtred_img_content_list = []
+        for img_content in img_content_list:
+            if img_content["division"] == filter_on_dim:
+                filtred_img_content_list.append(img_content)
+
     # Extracting positive and negative samples
-    for img_content in tqdm.tqdm(img_content_list):
+    return_values = Parallel(n_jobs=n_jobs)(delayed(rule_fun)(
+        img_content["content"], **kwargs) for img_content in tqdm.tqdm(filtred_img_content_list))
 
-        if filter_on_dim is not None:
-            if img_content["division"] != filter_on_dim:
-                continue
+    is_positive, is_excluded = zip(*return_values)
 
-        is_positive, is_excluded = rule_fun(img_content["content"], **kwargs)
+    for img_idx in range(len(img_content_list)):
 
-        if is_positive:
+        if is_positive[img_idx]:
             if pos_nb < dataset_pos_samples_nb:
-                pos_list.append(img_content["path"])
+                pos_list.append(filtred_img_content_list[img_idx]["path"])
             pos_nb += 1
-        elif not is_excluded:
+        elif not is_excluded[img_idx]:
             if neg_nb < dataset_neg_samples_nb:
-                neg_list.append(img_content["path"])
+                neg_list.append(filtred_img_content_list[img_idx]["path"])
             neg_nb += 1
 
         if pos_nb >= dataset_pos_samples_nb and neg_nb >= dataset_neg_samples_nb:
@@ -376,12 +385,13 @@ def generic_rule_pattern_exactly_N_times(img_content, pattern_content, N, x_divi
 def create_dataset_generic_rule_extract_sample(db_dir, datasets_dir_path, csv_name_train, csv_name_test, csv_name_valid,
                                                test_size, valid_size, dataset_pos_samples_nb, dataset_neg_samples_nb,
                                                sample_path, sample_nb_per_class, generic_rule_fun, filter_on_dim=None,
-                                               **kwargs):
+                                               n_jobs=1, **kwargs):
     """
     Creating a dataset with the given characteristics and following the given generic rule, and extracting a sample
     of positive and negative instances.
 
     :param db_dir: path to the root directory of the database.
+    :param datasets_dir_path: path to the root directory of the dataset.
     :param csv_name_train: path to the csv file indexing training dataset.
     :param csv_name_test: path to the csv file indexing test dataset.
     :param csv_name_valid: path to the csv file indexing validation dataset.
@@ -393,6 +403,7 @@ def create_dataset_generic_rule_extract_sample(db_dir, datasets_dir_path, csv_na
     :param sample_nb_per_class: size of the sample for each class.
     :param generic_rule_fun: generic rule function that is used to generate the dataset.
     :param filter_on_dim: if tuple (xdim, ydim), only samples with given dimension will be considered.
+    :param n_jobs: number of jobs to run in parallel.
     :param kwargs: kwargs to give to the generic rule function.
     :return:
     """
@@ -402,7 +413,8 @@ def create_dataset_generic_rule_extract_sample(db_dir, datasets_dir_path, csv_na
                                  test_size=test_size, valid_size=valid_size,
                                  dataset_pos_samples_nb=dataset_pos_samples_nb,
                                  dataset_neg_samples_nb=dataset_neg_samples_nb,
-                                 rule_fun=generic_rule_fun, filter_on_dim=filter_on_dim, **kwargs)
+                                 rule_fun=generic_rule_fun, filter_on_dim=filter_on_dim, n_jobs=n_jobs,
+                                 **kwargs)
 
     # Sample extraction
     extract_sample_from_dataset(db_dir, datasets_dir_path, csv_name_train, sample_path, sample_nb_per_class,
