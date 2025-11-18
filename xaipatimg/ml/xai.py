@@ -635,7 +635,6 @@ def _cf_single_sample_random_approach(db_dir, datasets_dir_path, sample_idx, xai
     # In case no counterfactual was found at any depth, returning None
     return None, None
 
-
 def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_dict, tokenizer, dataset, y, y_pred, idx,
                                      path_to_counterfactuals_dir_for_model_errors, pos_llm_scaffold, neg_llm_scaffold):
     """
@@ -692,14 +691,11 @@ def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_di
                      f"symbols of colors. The images are described in a JSON data structure. The coordinates "
                      f"system uses letters from A to F for the columns and numbers from 1 to 6 for the rows. The "
                      f"user will provide you the prediction of the AI model for a given image and the corresponding "
-                     f"JSON data. You need to give an explanation of the prediction. The explanation must be as "
-                     f"short as possible, and must refer explicitly to coordinates of the symbols, whenever "
-                     f"applicable. When listing coordinates, list all elements in increasing order of rows (all elements"
-                     f"of row 1 then all elements of row 2, etc). Use line breaks whenever possible but make sure the "
-                     f"generated explanation contains 13 lines at most. "
-                     f"Do not use escape characters or markdown syntax. Each explanation must start with 'The AI "
-                     f"predicts |YES| because' if the prediction is Yes or"
-                     f"The AI predicts |NO| because' if the prediction is No. The question that the model must answer to "
+                     f"JSON data. You need to give an explanation of the prediction. The explanation is expected to be"
+                     f"a short sentence and then a list of all coordinates that are involved in the model's prediction."
+                     f"The justification sentence and the list of coordinates must be separated by the character '|'" 
+                     f"Do not use escape characters or markdown syntax."
+                     f"The question that the model must answer to "
                      f"is '{question}'. Here are examples of justifications for a positive and a negative sample. "
                      f"Positive : '{pos_llm_scaffold}' Negative : '{neg_llm_scaffold}'")
 
@@ -734,6 +730,105 @@ def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_di
     parsed_answer = full_answer.partition("<|start|>assistant<|channel|>final<|message|>")[2]
     parsed_answer = parsed_answer.partition("<|return|>")[0]
     return parsed_answer
+
+# def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_dict, tokenizer, dataset, y, y_pred, idx,
+#                                      path_to_counterfactuals_dir_for_model_errors, pos_llm_scaffold, neg_llm_scaffold):
+#     """
+#     Generating the LLM explanation
+#     :param db: database dictionary.
+#     :param llm_model: instanciated LLM model.
+#     :param tokenizer: instanciated tokenizer.
+#     :param dataset: PatImgDataset instance.
+#     :param y: true label of the sample.
+#     :param y_pred: prediction of the model for the sample.
+#     :param idx: index of explanation to generate.
+#     :param path_to_counterfactuals_dir_for_model_errors: path to the directory in which counterfactual explanations have
+#     been generated. If not None, the counterfactual explanation is used instead of the actual sample to generate the
+#     LLM explanation when the model makes the wrong prediction. This ensures that the generated explanation is consistent
+#     with the model prediction.
+#     :param pos_llm_scaffold: scaffold of an explanation the LLM is supposed to generate for a positive instance.
+#     :param neg_llm_scaffold: scaffold of an explanation the LLM is supposed to generate for a negative instance.
+#     :return:
+#     """
+#
+#     def custom_sort(a):
+#         """
+#         Custom function to sort dict elements row first then columns
+#         :param a:
+#         :return:
+#         """
+#         return a["pos"][1], a["pos"][0]
+#
+#     # Function that converts the dict image content to an equivalent with explicit color names and using the
+#     # (A..F)(1..6) coordinates notation
+#     def convert_content(img_content, explicit_colors_dict):
+#
+#         # Create dictionaries associating x and y coordinates to the corresponding value in the (A..F)(1..6) coordinates
+#         # notation
+#         dict_coords_y = {i: chr(ord("1") + i) for i in range(6)}
+#         dict_coords_x = {i: chr(ord("A") + i) for i in range(6)}
+#
+#         new_content = []
+#         for shape_content in img_content:
+#             new_shape_content = {"shape": shape_content["shape"]}
+#             x_pos, y_pos = shape_content["pos"][0], shape_content["pos"][1]
+#             new_coord = dict_coords_x[x_pos] + dict_coords_y[y_pos]
+#             new_shape_content["pos"] = new_coord
+#             new_shape_content["color"] = explicit_colors_dict[shape_content["color"]]
+#             new_content.append(new_shape_content)
+#
+#         # Sorting the elements row-first
+#         new_content = sorted(new_content, key=custom_sort)
+#
+#         return new_content
+#
+#     system_prompt = (f"You are the explainability system of an AI model. Your role is to justify the decisions of "
+#                      f"the model. The role of the model is to answer questions about the content of images of "
+#                      f"symbols of colors. The images are described in a JSON data structure. The coordinates "
+#                      f"system uses letters from A to F for the columns and numbers from 1 to 6 for the rows. The "
+#                      f"user will provide you the prediction of the AI model for a given image and the corresponding "
+#                      f"JSON data. You need to give an explanation of the prediction. The explanation must be as "
+#                      f"short as possible, and must refer explicitly to coordinates of the symbols, whenever "
+#                      f"applicable. When listing coordinates, list all elements in increasing order of rows (all elements"
+#                      f"of row 1 then all elements of row 2, etc). Use line breaks whenever possible but make sure the "
+#                      f"generated explanation contains 13 lines at most. "
+#                      f"Do not use escape characters or markdown syntax. Each explanation must start with 'The AI "
+#                      f"predicts |YES| because' if the prediction is Yes or"
+#                      f"The AI predicts |NO| because' if the prediction is No. The question that the model must answer to "
+#                      f"is '{question}'. Here are examples of justifications for a positive and a negative sample. "
+#                      f"Positive : '{pos_llm_scaffold}' Negative : '{neg_llm_scaffold}'")
+#
+#     # Loading the rule's counterfactual explanation instead of the original sample in case the model makes the wrong
+#     # prediction, so that the class of the sample matches the class predicted by the model.
+#     if path_to_counterfactuals_dir_for_model_errors is not None and y != y_pred:
+#         with open(os.path.join(path_to_counterfactuals_dir_for_model_errors, f"{idx}_function.json")) as json_data:
+#             img_content = str(convert_content(json.load(json_data)["content"], explicit_colors_dict))
+#     # Otherwise loading the image content of the original sample
+#     else:
+#         img_id = dataset.get_id(idx)
+#         img_content = str(convert_content(db[img_id]["content"], explicit_colors_dict))
+#
+#     user_prompt = f"The AI model predicts {"Yes" if y_pred == 1 else "No"} for the image : {img_content}"
+#     messages = [
+#         {"role": "system", "content": system_prompt},
+#         {"role": "user", "content": user_prompt}
+#     ]
+#
+#     inputs = tokenizer.apply_chat_template(
+#         messages,
+#         add_generation_prompt=True,
+#         return_tensors="pt",
+#         return_dict=True,
+#     ).to(llm_model.device)
+#
+#     # Performing LLM computation
+#     generated = llm_model.generate(**inputs, max_new_tokens=3000)
+#
+#     # Parsing LLM answer
+#     full_answer = tokenizer.decode(generated[0][inputs["input_ids"].shape[-1]:])
+#     parsed_answer = full_answer.partition("<|start|>assistant<|channel|>final<|message|>")[2]
+#     parsed_answer = parsed_answer.partition("<|return|>")[0]
+#     return parsed_answer
 
 
 def generate_LLM_explanations(db_dir, db, datasets_dir_path, dataset_filename, model_dir, llm_model, llm_tokenizer,
