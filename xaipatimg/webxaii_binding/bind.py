@@ -183,13 +183,17 @@ def _sample_instances(y, y_pred, sample_size, shown_accuracy):
     # Iterating over the samples to extract the model errors instances
     for idx in all_samples_idx:
         if _is_error(y[idx], y_pred[idx]):
-            idx_selected.append(idx)
 
-            n_errors_selected += 1
             if _is_pos(y[idx]):
-                n_pos_selected += 1
+                if n_pos_selected < n_pos_target:
+                    n_pos_selected += 1
+                    idx_selected.append(idx)
+                    n_errors_selected += 1
             else:
-                n_neg_selected += 1
+                if n_neg_selected < n_neg_target:
+                    n_neg_selected += 1
+                    idx_selected.append(idx)
+                    n_errors_selected += 1
 
         if n_errors_selected == n_errors_target:
             break
@@ -213,7 +217,7 @@ def _sample_instances(y, y_pred, sample_size, shown_accuracy):
             break
 
     if n_pos_selected != n_pos_target or n_neg_selected != n_neg_target:
-        raise ValueError(f"Impossible to extract the number of positive samples ({n_pos_selected}/{n_pos_target}) or"
+        raise ValueError(f"Impossible to extract the number of positive samples ({n_pos_selected}/{n_pos_target}) or "
                          f"negative samples ({n_neg_selected}/{n_neg_target}).)")
 
     # Shuffling the order of selected instances (to not have the model errors first)
