@@ -67,8 +67,25 @@ def draw_star(draw, x, y, size, color, points=4, inner_ratio=0.5):
 
     draw.polygon(coords, fill=color, outline=color)
 
+def draw_question_mark(draw, x, y, size, color, font_path=None):
+    # Load a font
+    if font_path:
+        font = ImageFont.truetype(font_path, int(size))
+    else:
+        font = ImageFont.load_default(int(size))
+
+    text = "?"
+
+    # Get bounding box (left, top, right, bottom)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    w = bbox[2] - bbox[0]
+    h = bbox[3] - bbox[1]
+
+    # Center the text at (x, y)
+    draw.text((x, y), "?", font=font, fill=color, anchor="mm")
+
 def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlight=None, draw_coordinates=True,
-            overwrite=False, return_image=False):
+            empty_cell_as_question_mark=False, overwrite=False, return_image=False):
     """
     Generate a grid label image, as well as highlighting a feature in the image. 
     :param img_path: path where to save the generated image.
@@ -78,6 +95,7 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
     :param dimension: tuple that describes the size of the image in pixels.
     :param to_highlight: List of (x, y) positions to highlight in the image.
     :param draw_coordinates: If True, draw coordinates on the image.
+    :param empty_cell_as_question_mark: If True, draws a question mark in the center of the empty cells
     :param overwrite: whether to overwrite existing images. If False, no action will be taken if the image already exists.
     :param return_image : whether to return the generated image
     :return: None
@@ -152,11 +170,13 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
     # Define shape size
     shape_size = 0.7 * min(cell_width, cell_height)
 
+    non_empty_cells = []
     # Iterating over all the shapes to draw
     for c in content:
 
         # Extracting the features of the current shape to draw
         x, y = c["pos"]
+        non_empty_cells.append((x, y))
         shape = c["shape"]
         color = c["color"]
 
@@ -186,6 +206,17 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
             outline=(153, 153, 153), width=3
         )
 
+    # Drawing a question mark into every non-empty cell, if the option is on.
+    if empty_cell_as_question_mark:
+        for idx_x in range(division[0]):
+            for idx_y in range(division[1]):
+                if (idx_x, idx_y) not in non_empty_cells:
+                    x_center = grid_origin_x + (idx_x + 0.5) * cell_width
+                    y_center = grid_origin_y + (idx_y + 0.5) * cell_height
+
+                    draw_question_mark(draw, x_center, y_center, shape_size / 2, "black")
+
+
     # Save the image
     if img_path is not None:
         img.save(img_path)
@@ -196,7 +227,7 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
     return None
 
 
-def gen_img_and_save_db(db, db_dir, overwrite=False, draw_coordinates=True, n_jobs=1):
+def gen_img_and_save_db(db, db_dir, overwrite=False, draw_coordinates=True, empty_cell_as_question_mark=False, n_jobs=1):
     """
     Generate every image from the DB.
     :param db_dir: path to the root of the DB
@@ -204,6 +235,7 @@ def gen_img_and_save_db(db, db_dir, overwrite=False, draw_coordinates=True, n_jo
     :param overwrite: whether to overwrite existing images. If False, the images that already exist in the filesystem
     are ignored by this function.
     :param draw_coordinates: If True, draw coordinates on the image.
+    :param empty_cell_as_question_mark: If True, draw a question mark in the center of the empty cells.
     :param n_jobs: number of jobs to run in parallel.
     :return:
     """
@@ -215,6 +247,7 @@ def gen_img_and_save_db(db, db_dir, overwrite=False, draw_coordinates=True, n_jo
                                              img_data_list[i]["division"], img_data_list[i]["size"],
                                              None, # to_highlight
                                              draw_coordinates, # draw_coordinates
+                                             empty_cell_as_question_mark, # empty_cell_as_question_mark
                                              overwrite, # overwrite
                                              False # return_image
                                              ) for i in tqdm.tqdm(range(len(img_data_list))))
