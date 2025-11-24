@@ -225,21 +225,26 @@ def train_resnet_model(db_dir, datasets_dir_path, train_dataset_filename, valid_
     training_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
     valid_loader = torch.utils.data.DataLoader(dataset_valid, batch_size=batch_size, shuffle=False)
 
-    if resnet_type == "resnet18":
-        model = torch.hub.load('pytorch/vision:v0.10.0',
-                               'resnet18', pretrained=False)
-        model.fc = Linear(512, 2)
-        model = model.to(device)
-
-    elif resnet_type == "resnet50":
-
-        model = torch.hub.load('pytorch/vision:v0.10.0',
-                               'resnet50', pretrained=False)
-        model.fc = Linear(2048, 2)
-        model = model.to(device)
+    if os.path.isfile(os.path.join(model_dir, "final_model")):
+        print("loading existing model")
+        model = load_resnet_based_model(model_dir, device, resnet_type)
 
     else:
-        raise ValueError(f"Unknown resnet type {resnet_type}")
+        if resnet_type == "resnet18":
+            model = torch.hub.load('pytorch/vision:v0.10.0',
+                                   'resnet18', pretrained=False)
+            model.fc = Linear(512, 2)
+            model = model.to(device)
+
+        elif resnet_type == "resnet50":
+
+            model = torch.hub.load('pytorch/vision:v0.10.0',
+                                   'resnet50', pretrained=False)
+            model.fc = Linear(2048, 2)
+            model = model.to(device)
+
+        else:
+            raise ValueError(f"Unknown resnet type {resnet_type}")
 
     optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
     loss_fn = torch.nn.CrossEntropyLoss()
