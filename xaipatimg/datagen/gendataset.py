@@ -327,16 +327,20 @@ def generic_rule_shape_color_even(img_content, color, shape, x_division, y_divis
     obj = PatImgObj({"content": img_content, "division": (x_division, y_division), "path": None, "size": None})
     return len(obj.get_symbols_by(shape=shape, color=color)) % 2 == 0, False
 
-def generic_rule_shape_in_every_row(img_content, shape, y_division):
+
+def generic_rule_shape_in_every_row(img_content, shape, y_division, exclude_two_rows_missing=False):
     """
     Return True iff there is the given shape in every row of the image.
     :param img_content: dictionary content of the image.
     :param shape: shape to identify.
     :param y_division: number of y divisions.
+    :param exclude_two_rows_missing:
     :return: respects rule, is_excluded (no exclusion criteria)
     """
     _, pattern_count, _ = _extract_rows_with_only_shape_or_color(img_content, y_division, shape=shape)
-    return np.all(pattern_count), False
+
+    exclusion = np.sum(pattern_count == 0) > 1 if exclude_two_rows_missing else False
+    return np.all(pattern_count), exclusion
 
 
 def generic_rule_pattern_exactly_1_time_exclude_more(img_content, pattern_content, x_division_full, y_division_full,
