@@ -257,6 +257,7 @@ def generate_resources_dir(db_dir, interface_dir, model_dir, models_names_list, 
 
     # Iterating over all the model names
     for model_idx, model_name in enumerate(models_names_list):
+        print(model_name)
         data_d = {}
         with open(os.path.join(model_dir, model_name, "xai_index.csv"), 'r') as f:
             fieldnames = ["idx", "y", "y_pred", "path", "AI"] + XAI_names_list
