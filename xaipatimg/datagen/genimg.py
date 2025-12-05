@@ -6,6 +6,8 @@ import os
 import tqdm
 from joblib import Parallel, delayed
 
+from . import COLORS
+
 def draw_circle(draw, x, y, size, color):
     draw.ellipse([x - size*0.8, y - size*0.8, x + size*0.8,
                  y + size*0.8], fill=color, outline=color)
@@ -177,8 +179,8 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
         # Extracting the features of the current shape to draw
         x, y = c["pos"]
         non_empty_cells.append((x, y))
-        shape = c["shape"]
-        color = c["color"]
+        shape = c["shp"]
+        color = COLORS[c["col"]]
 
         # Calculate the center of the current grid cell
         x_center = grid_origin_x + (x + 0.5) * cell_width
@@ -227,7 +229,8 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
     return None
 
 
-def gen_img_and_save_db(db, db_dir, overwrite=False, draw_coordinates=True, empty_cell_as_question_mark=False, n_jobs=1):
+def gen_img_and_save_db(db, db_dir, overwrite=False, draw_coordinates=True, empty_cell_as_question_mark=False,
+                        do_save_db=True, n_jobs=1):
     """
     Generate every image from the DB.
     :param db_dir: path to the root of the DB
@@ -236,19 +239,18 @@ def gen_img_and_save_db(db, db_dir, overwrite=False, draw_coordinates=True, empt
     are ignored by this function.
     :param draw_coordinates: If True, draw coordinates on the image.
     :param empty_cell_as_question_mark: If True, draw a question mark in the center of the empty cells.
+    :param do_save_db: whether to save the JSON file in addition to generating the images
     :param n_jobs: number of jobs to run in parallel.
     :return:
     """
-    img_data_list = list(db.values())
 
     # Parallel generation of the images
-    Parallel(n_jobs=n_jobs)(delayed(gen_img)(os.path.join(db_dir, img_data_list[i]["path"]),
-                                             img_data_list[i]["content"],
-                                             img_data_list[i]["division"], img_data_list[i]["size"],
+    Parallel(n_jobs=n_jobs)(delayed(gen_img)(os.path.join(db_dir, v["path"]), v["cnt"], v["div"], v["size"],
                                              None, # to_highlight
                                              draw_coordinates, # draw_coordinates
                                              empty_cell_as_question_mark, # empty_cell_as_question_mark
                                              overwrite, # overwrite
                                              False # return_image
-                                             ) for i in tqdm.tqdm(range(len(img_data_list))))
-    save_db(db=db, db_dir=db_dir)
+                                             ) for k, v in tqdm.tqdm(db.items()))
+    if do_save_db:
+        save_db(db=db, db_dir=db_dir)

@@ -14,7 +14,7 @@ def gen_rand_sym(shapes, colors):
     :param colors: list of possible colors
     :return: random symbol image description
     """
-    return {"shape": np.random.choice(shapes), "color": np.random.choice(colors)}
+    return {"shp": np.random.choice(shapes), "col": np.random.choice(colors)}
 
 
 def get_coords_diff(patimgobj1, patimgobj2):
@@ -79,7 +79,7 @@ class PatImgObj:
         self.img_content_arr_shape_color = np.full(self.division, "", dtype="U100")
 
         for c in self.img_content:
-            self.img_content_arr_shape_color[c["pos"][0]][c["pos"][1]] = c["color"] + c["shape"]
+            self.img_content_arr_shape_color[c["pos"][0]][c["pos"][1]] = c["col"] + c["shp"]
 
 
     def set_symbol(self, posx, posy, value):
@@ -94,7 +94,7 @@ class PatImgObj:
         """
         value["pos"] = [posx, posy]
         self.img_content_arr[posx][posy] = value
-        self.img_content_arr_shape_color[posx][posy] = value["color"] + value["shape"]
+        self.img_content_arr_shape_color[posx][posy] = value["col"] + value["shp"]
 
     def remove_symbol(self, posx, posy):
         """
@@ -149,7 +149,7 @@ class PatImgObj:
         # Constructing the submatrix the same way the full matrix is constructed
         submatrix_np = np.full(submatrix_shape, "", dtype="U100")
         for c in submatrix_content:
-            submatrix_np[c["pos"][0]][c["pos"][1]] = c["color"] + c["shape"]
+            submatrix_np[c["pos"][0]][c["pos"][1]] = c["col"] + c["shp"]
 
         M, N = self.img_content_arr_shape_color.shape
         m, n = submatrix_np.shape
@@ -182,8 +182,8 @@ class PatImgObj:
         """
         for i in range(self.division[0]):
             if self.img_content_arr[i, pos_y] is not None:
-                self.img_content_arr[i, pos_y]["shape"] = shape
-                self.img_content_arr_shape_color[i][pos_y] = self.img_content_arr[i, pos_y]["color"] + shape
+                self.img_content_arr[i, pos_y]["shp"] = shape
+                self.img_content_arr_shape_color[i][pos_y] = self.img_content_arr[i, pos_y]["col"] + shape
 
 
     def get_empty_lines(self):
@@ -216,8 +216,8 @@ class PatImgObj:
 
         return {
             "size": self.size,
-            "division": self.division,
-            "content": img_content,
+            "div": self.division,
+            "cnt": img_content,
             "path": self.path,
         }
 

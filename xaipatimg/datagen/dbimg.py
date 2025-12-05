@@ -2,6 +2,9 @@ import json
 import uuid
 import os
 
+import pandas as pd
+
+
 def generate_uuid():
     return str(uuid.uuid1().hex)
 
@@ -27,3 +30,4 @@ def save_db(db_dir, db):
     """
     with open(os.path.join(db_dir, "db.json"), 'w', encoding='utf-8') as f:
         json.dump(db, f, ensure_ascii=False, indent=4)
+

@@ -48,12 +48,12 @@ def create_dataset_based_on_rule(db_dir, datasets_dir_path, csv_filename_train, 
     else:
         filtred_img_content_list = []
         for img_content in img_content_list:
-            if img_content["division"] == filter_on_dim:
+            if img_content["div"] == filter_on_dim:
                 filtred_img_content_list.append(img_content)
 
     # Extracting positive and negative samples
     return_values = Parallel(n_jobs=n_jobs)(delayed(rule_fun)(
-        img_content["content"], **kwargs) for img_content in tqdm.tqdm(filtred_img_content_list))
+        img_content["cnt"], **kwargs) for img_content in tqdm.tqdm(filtred_img_content_list))
 
     is_positive, is_excluded = zip(*return_values)
 
@@ -165,12 +165,12 @@ def _extract_rows_with_only_shape_or_color(img_content, y_division, shape=None, 
 
     for c in img_content:
         if shape is not None :
-            if c["shape"] == shape:
+            if c["shp"] == shape:
                 pattern_counter[c["pos"][1]] += 1
                 continue
 
         if color is not None:
-            if c["color"] == color:
+            if c["col"] == color:
                 pattern_counter[c["pos"][1]] += 1
                 continue
 
@@ -192,12 +192,12 @@ def _extract_cols_with_only_shape_or_color(img_content, x_division, shape=None, 
 
     for c in img_content:
         if shape is not None :
-            if c["shape"] == shape:
+            if c["shp"] == shape:
                 pattern_counter[c["pos"][0]] += 1
                 continue
 
         if color is not None:
-            if c["color"] == color:
+            if c["col"] == color:
                 pattern_counter[c["pos"][0]] += 1
                 continue
 
@@ -259,7 +259,7 @@ def generic_rule_N_times_color_exactly(img_content, N, color, x_division, y_divi
     :param color: color to count the instances of.
     :return: respects rule, is_excluded (no exclusion criteria)
     """
-    obj = PatImgObj({"content": img_content, "division": (x_division, y_division), "path": None, "size": None})
+    obj = PatImgObj({"cnt": img_content, "div": (x_division, y_division), "path": None, "size": None})
     return len(obj.get_symbols_by(color=color)) == N, False
 
 def generic_rule_N_times_color_shape_exactly(img_content, N, color, shape, x_division, y_division,
@@ -276,7 +276,7 @@ def generic_rule_N_times_color_shape_exactly(img_content, N, color, shape, x_div
     [N-1, N+1] symbols of the given color and shape.
     :return: respects rule, is_excluded
     """
-    obj = PatImgObj({"content": img_content, "division": (x_division, y_division), "path": None, "size": None})
+    obj = PatImgObj({"cnt": img_content, "div": (x_division, y_division), "path": None, "size": None})
 
     count = len(obj.get_symbols_by(color=color, shape=shape))
     exclusion = (count < N - 1 or count > N + 1) if restrict_plus_minus_1 else False
@@ -295,7 +295,7 @@ def generic_rule_shape_color_plus_shape_equals_N(img_content, shape1, color1, sh
     :param y_division: number of y divisions.
     :return: respects rule, is_excluded (no exclusion criteria)
     """
-    obj = PatImgObj({"content": img_content, "division": (x_division, y_division), "path": None, "size": None})
+    obj = PatImgObj({"cnt": img_content, "div": (x_division, y_division), "path": None, "size": None})
     return len(obj.get_symbols_by(shape=shape1, color=color1)) + len(obj.get_symbols_by(shape=shape2)) == N, False
 
 def generic_rule_shape_color_times_2_shape_equals_shape(img_content, shape1, color1, shape2, x_division, y_division):
@@ -311,7 +311,7 @@ def generic_rule_shape_color_times_2_shape_equals_shape(img_content, shape1, col
     :param y_division: number of y divisions.
     :return: respects rule, is_excluded (no exclusion criteria)
     """
-    obj = PatImgObj({"content": img_content, "division": (x_division, y_division), "path": None, "size": None})
+    obj = PatImgObj({"cnt": img_content, "div": (x_division, y_division), "path": None, "size": None})
     return len(obj.get_symbols_by(shape=shape1, color=color1)) * 2 == len(obj.get_symbols_by(shape=shape2)), False
 
 def generic_rule_shape_color_even(img_content, color, shape, x_division, y_division):
@@ -324,7 +324,7 @@ def generic_rule_shape_color_even(img_content, color, shape, x_division, y_divis
     :param y_division: number of y divisions.
     :return: is_excluded (no exclusion criteria)
     """
-    obj = PatImgObj({"content": img_content, "division": (x_division, y_division), "path": None, "size": None})
+    obj = PatImgObj({"cnt": img_content, "div": (x_division, y_division), "path": None, "size": None})
     return len(obj.get_symbols_by(shape=shape, color=color)) % 2 == 0, False
 
 
@@ -359,7 +359,7 @@ def generic_rule_pattern_exactly_1_time_exclude_more(img_content, pattern_conten
     :return: respects rule, is_excluded
     """
 
-    obj = PatImgObj({"content": img_content, "division": (x_division_full, y_division_full), "path": None, "size": None})
+    obj = PatImgObj({"cnt": img_content, "div": (x_division_full, y_division_full), "path": None, "size": None})
     submatrixes_positions = obj.find_submatrix_positions(pattern_content, (x_division_pattern, y_division_pattern),
                                                          consider_rotations=consider_rotations)
 
@@ -380,7 +380,7 @@ def generic_rule_pattern_exactly_N_times(img_content, pattern_content, N, x_divi
     :param y_division_pattern: Y division of the pattern to search for
     """
 
-    obj = PatImgObj({"content": img_content, "division": (x_division_full, y_division_full), "path": None, "size": None})
+    obj = PatImgObj({"cnt": img_content, "div": (x_division_full, y_division_full), "path": None, "size": None})
     submatrixes_positions = obj.find_submatrix_positions(pattern_content, (x_division_pattern, y_division_pattern))
 
     return len(submatrixes_positions) == N, False

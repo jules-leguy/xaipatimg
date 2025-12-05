@@ -554,14 +554,14 @@ def _cf_single_sample_random_approach(db_dir, datasets_dir_path, sample_idx, xai
 
         # Saving the original image
         og_img_path = join(temp_dir, "original.png")
-        gen_img(og_img_path, img_entry["content"], img_entry["division"], img_entry["size"])
+        gen_img(og_img_path, img_entry["cnt"], img_entry["div"], img_entry["size"])
 
         possible_cf_paths = []
         # Writing the possible counterfactuals into the temporary directory
         for cf_id, cf_dict in enumerate(mutations_dict_list):
             curr_cf_path = join(temp_dir, str(cf_id) + ".png")
             possible_cf_paths.append(curr_cf_path)
-            gen_img(curr_cf_path, cf_dict["content"], cf_dict["division"], cf_dict["size"])
+            gen_img(curr_cf_path, cf_dict["cnt"], cf_dict["div"], cf_dict["size"])
 
         # Writing a CSV dataset of counterfactuals to be able to pass them through the model
         dataset_path = os.path.join(temp_dir, "dataset.csv")
@@ -585,7 +585,7 @@ def _cf_single_sample_random_approach(db_dir, datasets_dir_path, sample_idx, xai
             # Verifying that the generated sample is an actual counterfactual to generic rule function (differs from the
             # model counterfactual if the model makes the wrong prediction for the sample).
             if rule_cf_found_dict is None:
-                gen_fun_return, _ = generic_rule_fun(mutations_dict_list[y_pred_model_cf_idx]["content"], **kwargs)
+                gen_fun_return, _ = generic_rule_fun(mutations_dict_list[y_pred_model_cf_idx]["cnt"], **kwargs)
                 y_cf = int(gen_fun_return)
                 if y_cf != y:
                     rule_cf_found_dict = mutations_dict_list[y_pred_model_cf_idx]
@@ -601,7 +601,7 @@ def _cf_single_sample_random_approach(db_dir, datasets_dir_path, sample_idx, xai
             shutil.copyfile(og_img_path, os.path.join(xai_output_path, str(sample_idx) + "_og.png"))
 
             coords_diff = get_coords_diff(PatImgObj(img_entry), PatImgObj(model_cf_found_dict))
-            cf_img = gen_img(None, model_cf_found_dict["content"], model_cf_found_dict["division"],
+            cf_img = gen_img(None, model_cf_found_dict["cnt"], model_cf_found_dict["div"],
                              model_cf_found_dict["size"],
                              to_highlight=coords_diff, return_image=True)
 
@@ -637,7 +637,8 @@ def _cf_single_sample_random_approach(db_dir, datasets_dir_path, sample_idx, xai
     return None, None
 
 def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_dict, tokenizer, dataset, y, y_pred, idx,
-                                     path_to_counterfactuals_dir_for_model_errors, pos_llm_scaffold, neg_llm_scaffold):
+                                     path_to_counterfactuals_dir_for_model_errors, pos_llm_scaffold, neg_llm_scaffold,
+                                     division_X, division_Y, pattern_dict=None):
     """
     Generating the LLM explanation
     :param db: database dictionary.
@@ -653,6 +654,9 @@ def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_di
     with the model prediction.
     :param pos_llm_scaffold: scaffold of an explanation the LLM is supposed to generate for a positive instance.
     :param neg_llm_scaffold: scaffold of an explanation the LLM is supposed to generate for a negative instance.
+    :param division_X: number of X divisions
+    :param division_Y: number of Y divisions
+    :param pattern_dict: if the task is to search for a pattern of symbols, JSON description of the pattern.
     :return:
     """
 
@@ -666,54 +670,68 @@ def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_di
 
     # Function that converts the dict image content to an equivalent with explicit color names and using the
     # (A..F)(1..6) coordinates notation
-    def convert_content(img_content, explicit_colors_dict):
+    def convert_content(img_content, explicit_colors_dict, for_pattern=False):
 
-        # Create dictionaries associating x and y coordinates to the corresponding value in the (A..F)(1..6) coordinates
+        # Create dictionaries associating x and y coordinates to the corresponding value in the (A..X)(1..N) coordinates
         # notation
-        dict_coords_y = {i: chr(ord("1") + i) for i in range(6)}
-        dict_coords_x = {i: chr(ord("A") + i) for i in range(6)}
+        dict_coords_y = {i: str(1 + i) for i in range(division_Y)}
+        dict_coords_x = {i: chr(ord("A") + i) for i in range(division_X)}
+
+        if for_pattern:
+            dict_coords_y = {i: f"N" if i == 0 else f"N+{i}" for i in range(division_Y)}
+            dict_coords_x = {i: f"X" if i == 0 else f"X+{i}" for i in range(division_X)}
+        else:
+            dict_coords_y = {i: str(1 + i) for i in range(division_Y)}
+            dict_coords_x = {i: chr(ord("A") + i) for i in range(division_X)}
 
         new_content = []
         for shape_content in img_content:
-            new_shape_content = {"shape": shape_content["shape"]}
+            new_shape_content = {"shp": shape_content["shp"]}
             x_pos, y_pos = shape_content["pos"][0], shape_content["pos"][1]
             new_coord = dict_coords_x[x_pos] + dict_coords_y[y_pos]
             new_shape_content["pos"] = new_coord
-            new_shape_content["color"] = explicit_colors_dict[shape_content["color"]]
+            new_shape_content["col"] = explicit_colors_dict[shape_content["col"]]
             new_content.append(new_shape_content)
 
         # Sorting the elements row-first
-        new_content = sorted(new_content, key=custom_sort)
+        # new_content = sorted(new_content, key=custom_sort)
 
         return new_content
+
+    pattern_dict_converted = convert_content(pattern_dict, explicit_colors_dict, for_pattern=True) if pattern_dict is not None else None
 
     system_prompt = (f"You are the explainability system of an AI model. Your role is to justify the decisions of "
                      f"the model. The role of the model is to answer questions about the content of images of "
                      f"symbols of colors. The images are described in a JSON data structure. The coordinates "
                      f"system uses letters from A to F for the columns and numbers from 1 to 6 for the rows. The "
                      f"user will provide you the prediction of the AI model for a given image and the corresponding "
-                     f"JSON data. You need to give an explanation of the prediction. The explanation is expected to be"
-                     f"a short sentence and then a list of all coordinates that are involved in the model's prediction."
-                     f"The justification sentence and the list of coordinates must be separated by the character '|'" 
-                     f"Do not use escape characters or markdown syntax."
-                     f"The question that the model must answer to "
-                     f"is '{question}'. Here are examples of justifications for a positive and a negative sample. "
+                     f"JSON data. You need to give an explanation of the prediction. The explanation is expected to be "
+                     f"a very short sentence which introduces a list of all coordinates that are involved in the model's"
+                     f" prediction. The justification sentence and the list of coordinates must be separated by the "
+                     f"character '|'. The coordinates are separated with the symbol ';', and there is no need to sort them. "
+                     f"Do not use escape characters or markdown syntax. The question the model must answer "
+                     f"is '{question}'.{f"The pattern to search for is "
+                                        f"{pattern_dict_converted}. Here X correspond to any letter coordinate, and N"
+                                        f"to any number coordinate." if pattern_dict is not None else ""} "
+                     f"Here are examples of justifications for a positive and a negative sample. "
                      f"Positive : '{pos_llm_scaffold}' Negative : '{neg_llm_scaffold}'")
+
+    print(system_prompt)
 
     # Loading the rule's counterfactual explanation instead of the original sample in case the model makes the wrong
     # prediction, so that the class of the sample matches the class predicted by the model.
     if path_to_counterfactuals_dir_for_model_errors is not None and y != y_pred:
         with open(os.path.join(path_to_counterfactuals_dir_for_model_errors, f"{idx}_function.json")) as json_data:
-            img_content = str(convert_content(json.load(json_data)["content"], explicit_colors_dict))
+            img_content = str(convert_content(json.load(json_data)["cnt"], explicit_colors_dict))
     # Otherwise loading the image content of the original sample
     else:
         img_id = dataset.get_id(idx)
-        img_content = str(convert_content(db[img_id]["content"], explicit_colors_dict))
+        img_content = str(convert_content(db[img_id]["cnt"], explicit_colors_dict))
 
     user_prompt = f"The AI model predicts {"Yes" if y_pred == 1 else "No"} for the image : {img_content}"
     messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt}
+        {"role": "system", "cnt": system_prompt},
+        {"role": "user", "cnt": user_prompt}
     ]
 
     inputs = tokenizer.apply_chat_template(
@@ -724,119 +742,21 @@ def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_di
     ).to(llm_model.device)
 
     # Performing LLM computation
-    generated = llm_model.generate(**inputs, max_new_tokens=3000)
+    generated = llm_model.generate(**inputs, max_new_tokens=5000)
 
     # Parsing LLM answer
     full_answer = tokenizer.decode(generated[0][inputs["input_ids"].shape[-1]:])
+    print(full_answer)
     parsed_answer = full_answer.partition("<|start|>assistant<|channel|>final<|message|>")[2]
     parsed_answer = parsed_answer.partition("<|return|>")[0]
     return parsed_answer
 
-# def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_dict, tokenizer, dataset, y, y_pred, idx,
-#                                      path_to_counterfactuals_dir_for_model_errors, pos_llm_scaffold, neg_llm_scaffold):
-#     """
-#     Generating the LLM explanation
-#     :param db: database dictionary.
-#     :param llm_model: instanciated LLM model.
-#     :param tokenizer: instanciated tokenizer.
-#     :param dataset: PatImgDataset instance.
-#     :param y: true label of the sample.
-#     :param y_pred: prediction of the model for the sample.
-#     :param idx: index of explanation to generate.
-#     :param path_to_counterfactuals_dir_for_model_errors: path to the directory in which counterfactual explanations have
-#     been generated. If not None, the counterfactual explanation is used instead of the actual sample to generate the
-#     LLM explanation when the model makes the wrong prediction. This ensures that the generated explanation is consistent
-#     with the model prediction.
-#     :param pos_llm_scaffold: scaffold of an explanation the LLM is supposed to generate for a positive instance.
-#     :param neg_llm_scaffold: scaffold of an explanation the LLM is supposed to generate for a negative instance.
-#     :return:
-#     """
-#
-#     def custom_sort(a):
-#         """
-#         Custom function to sort dict elements row first then columns
-#         :param a:
-#         :return:
-#         """
-#         return a["pos"][1], a["pos"][0]
-#
-#     # Function that converts the dict image content to an equivalent with explicit color names and using the
-#     # (A..F)(1..6) coordinates notation
-#     def convert_content(img_content, explicit_colors_dict):
-#
-#         # Create dictionaries associating x and y coordinates to the corresponding value in the (A..F)(1..6) coordinates
-#         # notation
-#         dict_coords_y = {i: chr(ord("1") + i) for i in range(6)}
-#         dict_coords_x = {i: chr(ord("A") + i) for i in range(6)}
-#
-#         new_content = []
-#         for shape_content in img_content:
-#             new_shape_content = {"shape": shape_content["shape"]}
-#             x_pos, y_pos = shape_content["pos"][0], shape_content["pos"][1]
-#             new_coord = dict_coords_x[x_pos] + dict_coords_y[y_pos]
-#             new_shape_content["pos"] = new_coord
-#             new_shape_content["color"] = explicit_colors_dict[shape_content["color"]]
-#             new_content.append(new_shape_content)
-#
-#         # Sorting the elements row-first
-#         new_content = sorted(new_content, key=custom_sort)
-#
-#         return new_content
-#
-#     system_prompt = (f"You are the explainability system of an AI model. Your role is to justify the decisions of "
-#                      f"the model. The role of the model is to answer questions about the content of images of "
-#                      f"symbols of colors. The images are described in a JSON data structure. The coordinates "
-#                      f"system uses letters from A to F for the columns and numbers from 1 to 6 for the rows. The "
-#                      f"user will provide you the prediction of the AI model for a given image and the corresponding "
-#                      f"JSON data. You need to give an explanation of the prediction. The explanation must be as "
-#                      f"short as possible, and must refer explicitly to coordinates of the symbols, whenever "
-#                      f"applicable. When listing coordinates, list all elements in increasing order of rows (all elements"
-#                      f"of row 1 then all elements of row 2, etc). Use line breaks whenever possible but make sure the "
-#                      f"generated explanation contains 13 lines at most. "
-#                      f"Do not use escape characters or markdown syntax. Each explanation must start with 'The AI "
-#                      f"predicts |YES| because' if the prediction is Yes or"
-#                      f"The AI predicts |NO| because' if the prediction is No. The question that the model must answer to "
-#                      f"is '{question}'. Here are examples of justifications for a positive and a negative sample. "
-#                      f"Positive : '{pos_llm_scaffold}' Negative : '{neg_llm_scaffold}'")
-#
-#     # Loading the rule's counterfactual explanation instead of the original sample in case the model makes the wrong
-#     # prediction, so that the class of the sample matches the class predicted by the model.
-#     if path_to_counterfactuals_dir_for_model_errors is not None and y != y_pred:
-#         with open(os.path.join(path_to_counterfactuals_dir_for_model_errors, f"{idx}_function.json")) as json_data:
-#             img_content = str(convert_content(json.load(json_data)["content"], explicit_colors_dict))
-#     # Otherwise loading the image content of the original sample
-#     else:
-#         img_id = dataset.get_id(idx)
-#         img_content = str(convert_content(db[img_id]["content"], explicit_colors_dict))
-#
-#     user_prompt = f"The AI model predicts {"Yes" if y_pred == 1 else "No"} for the image : {img_content}"
-#     messages = [
-#         {"role": "system", "content": system_prompt},
-#         {"role": "user", "content": user_prompt}
-#     ]
-#
-#     inputs = tokenizer.apply_chat_template(
-#         messages,
-#         add_generation_prompt=True,
-#         return_tensors="pt",
-#         return_dict=True,
-#     ).to(llm_model.device)
-#
-#     # Performing LLM computation
-#     generated = llm_model.generate(**inputs, max_new_tokens=3000)
-#
-#     # Parsing LLM answer
-#     full_answer = tokenizer.decode(generated[0][inputs["input_ids"].shape[-1]:])
-#     parsed_answer = full_answer.partition("<|start|>assistant<|channel|>final<|message|>")[2]
-#     parsed_answer = parsed_answer.partition("<|return|>")[0]
-#     return parsed_answer
-
-
 def generate_LLM_explanations(db_dir, db, datasets_dir_path, dataset_filename, model_dir, llm_model, llm_tokenizer,
                               xai_output_path, explicit_colors_dict, question, yes_pred_img_path, no_pred_img_path,
                               yes_pred_img_path_small, no_pred_img_path_small, pos_llm_scaffold, neg_llm_scaffold,
-                              device="cuda:0", dataset_size=None, only_for_index=None,
-                              path_to_counterfactuals_dir_for_model_errors=None, resnet_type="resnet18"):
+                              X_division, Y_division, pattern_dict=None, device="cuda:0", dataset_size=None,
+                              only_for_index=None, path_to_counterfactuals_dir_for_model_errors=None,
+                              resnet_type="resnet18"):
     """
     Generating LLM explanations for the given model and dataset.
     :param db_dir: root of the database.
@@ -855,6 +775,9 @@ def generate_LLM_explanations(db_dir, db, datasets_dir_path, dataset_filename, m
     :param no_pred_img_path: path to the image that represents the no for small rendering (as part of the LLM explanation).
     :param pos_llm_scaffold: scaffold of an explanation the LLM is supposed to generate for a positive instance.
     :param neg_llm_scaffold: scaffold of an explanation the LLM is supposed to generate for a negative instance.
+    :param X_division: number of X divisions.
+    :param Y_division: number of Y divisions.
+    :param pattern_dict: if the task is to search for a pattern of symbols, JSON description of the pattern.
     :param device: device to use for pytorch computation. The LLM will use all GPUs available.
     :param dataset_size: elements of the dataset are loaded until the size reaches this value. If None, the whole
     dataset is loaded.
@@ -880,7 +803,8 @@ def generate_LLM_explanations(db_dir, db, datasets_dir_path, dataset_filename, m
         expl_str = _llm_generate_single_explanation(db, llm_model, question, explicit_colors_dict, llm_tokenizer,
                                                     dataset, y[sample_idx], y_pred[sample_idx], sample_idx,
                                                     path_to_counterfactuals_dir_for_model_errors, pos_llm_scaffold,
-                                                    neg_llm_scaffold)
+                                                    neg_llm_scaffold, division_X=X_division, division_Y=Y_division,
+                                                    pattern_dict=pattern_dict)
 
         expl_img = generate_llm_text_image(text=expl_str, width=700, height=700, font_size=36, line_spacing=15,
                                            pred_img_scale=1.8, yes_pred_img_path=yes_pred_img_path_small,
