@@ -6,7 +6,8 @@ import os
 import tqdm
 from joblib import Parallel, delayed
 
-from . import COLORS
+from . import COLORS_MAP
+from . import SHAPES_MAP
 
 def draw_circle(draw, x, y, size, color):
     draw.ellipse([x - size*0.8, y - size*0.8, x + size*0.8,
@@ -179,8 +180,8 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
         # Extracting the features of the current shape to draw
         x, y = c["pos"]
         non_empty_cells.append((x, y))
-        shape = c["shp"]
-        color = COLORS[c["col"]]
+        shape = SHAPES_MAP[c["shp"]]
+        color = COLORS_MAP[c["col"]]
 
         # Calculate the center of the current grid cell
         x_center = grid_origin_x + (x + 0.5) * cell_width
