@@ -3,6 +3,9 @@ import json
 import os
 import tempfile
 
+import tqdm
+from pathlib import Path
+
 class JSONDB:
     """
     Lazy JSON-backed key–value store.
@@ -20,6 +23,7 @@ class JSONDB:
     def __init__(self, path):
         self.path = path
         self.buffer = {}
+        print("loading keys for " + path)
         self._load_keys()
 
         if not os.path.exists(self.path):
@@ -32,7 +36,7 @@ class JSONDB:
             return
         keys = []
         with open(self.path, 'rb') as f:
-            for prefix, event, value in ijson.parse(f):
+            for prefix, event, value in tqdm.tqdm(ijson.parse(f)):
                 if prefix == '' and event == 'map_key':
                     keys.append(value)
         self.stored_keys = set(keys)
@@ -63,7 +67,7 @@ class JSONDB:
         if not self.buffer:
             return
 
-        tmp_path = tempfile.mktemp()
+        tmp_path = tempfile.mktemp(dir=os.path.dirname(self.path))
 
         with open(self.path, 'r') as inp, open(tmp_path, 'w') as out:
             out.write('{\n')

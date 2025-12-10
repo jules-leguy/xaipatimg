@@ -14,7 +14,7 @@ from pytorch_grad_cam.utils.image import show_cam_on_image
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from PIL import Image, ImageFont, ImageDraw
 import matplotlib.pyplot as plt
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from xaipatimg.datagen import COLORS_EXPLICIT_NAMES_MAP, SHAPES_MAP
 
 from xaipatimg.datagen.dbimg import load_db
 from xaipatimg.datagen.genimg import gen_img
@@ -636,7 +636,7 @@ def _cf_single_sample_random_approach(db_dir, datasets_dir_path, sample_idx, xai
     # In case no counterfactual was found at any depth, returning None
     return None, None
 
-def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_dict, tokenizer, dataset, y, y_pred, idx,
+def _llm_generate_single_explanation(db, llm_model, question, tokenizer, dataset, y, y_pred, idx,
                                      path_to_counterfactuals_dir_for_model_errors, pos_llm_scaffold, neg_llm_scaffold,
                                      division_X, division_Y, pattern_dict=None):
     """
@@ -670,13 +670,10 @@ def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_di
 
     # Function that converts the dict image content to an equivalent with explicit color names and using the
     # (A..F)(1..6) coordinates notation
-    def convert_content(img_content, explicit_colors_dict, for_pattern=False):
+    def convert_content(img_content, for_pattern=False):
 
         # Create dictionaries associating x and y coordinates to the corresponding value in the (A..X)(1..N) coordinates
         # notation
-        dict_coords_y = {i: str(1 + i) for i in range(division_Y)}
-        dict_coords_x = {i: chr(ord("A") + i) for i in range(division_X)}
-
         if for_pattern:
             dict_coords_y = {i: f"N" if i == 0 else f"N+{i}" for i in range(division_Y)}
             dict_coords_x = {i: f"X" if i == 0 else f"X+{i}" for i in range(division_X)}
@@ -686,11 +683,11 @@ def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_di
 
         new_content = []
         for shape_content in img_content:
-            new_shape_content = {"shp": shape_content["shp"]}
+            new_shape_content = {"shape": SHAPES_MAP[shape_content["shp"]]}
             x_pos, y_pos = shape_content["pos"][0], shape_content["pos"][1]
             new_coord = dict_coords_x[x_pos] + dict_coords_y[y_pos]
-            new_shape_content["pos"] = new_coord
-            new_shape_content["col"] = explicit_colors_dict[shape_content["col"]]
+            new_shape_content["position"] = new_coord
+            new_shape_content["color"] = COLORS_EXPLICIT_NAMES_MAP[shape_content["col"]]
             new_content.append(new_shape_content)
 
         # Sorting the elements row-first
@@ -698,7 +695,7 @@ def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_di
 
         return new_content
 
-    pattern_dict_converted = convert_content(pattern_dict, explicit_colors_dict, for_pattern=True) if pattern_dict is not None else None
+    pattern_dict_converted = convert_content(pattern_dict, for_pattern=True) if pattern_dict is not None else None
 
     system_prompt = (f"You are the explainability system of an AI model. Your role is to justify the decisions of "
                      f"the model. The role of the model is to answer questions about the content of images of "
@@ -710,10 +707,10 @@ def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_di
                      f" prediction. The justification sentence and the list of coordinates must be separated by the "
                      f"character '|'. The coordinates are separated with the symbol ';', and there is no need to sort them. "
                      f"Do not use escape characters or markdown syntax. The question the model must answer "
-                     f"is '{question}'.{f"The pattern to search for is "
-                                        f"{pattern_dict_converted}. Here X correspond to any letter coordinate, and N"
+                     f"is '{question}'.{f" The pattern to search for is "
+                                        f"{pattern_dict_converted}. Here X correspond to any letter coordinate, and N "
                                         f"to any number coordinate." if pattern_dict is not None else ""} "
-                     f"Here are examples of justifications for a positive and a negative sample. "
+                     f" Here are examples of justifications for a positive and a negative sample. "
                      f"Positive : '{pos_llm_scaffold}' Negative : '{neg_llm_scaffold}'")
 
     print(system_prompt)
@@ -722,16 +719,16 @@ def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_di
     # prediction, so that the class of the sample matches the class predicted by the model.
     if path_to_counterfactuals_dir_for_model_errors is not None and y != y_pred:
         with open(os.path.join(path_to_counterfactuals_dir_for_model_errors, f"{idx}_function.json")) as json_data:
-            img_content = str(convert_content(json.load(json_data)["cnt"], explicit_colors_dict))
+            img_content = str(convert_content(json.load(json_data)["cnt"]))
     # Otherwise loading the image content of the original sample
     else:
         img_id = dataset.get_id(idx)
-        img_content = str(convert_content(db[img_id]["cnt"], explicit_colors_dict))
+        img_content = str(convert_content(db[img_id]["cnt"]))
 
     user_prompt = f"The AI model predicts {"Yes" if y_pred == 1 else "No"} for the image : {img_content}"
     messages = [
-        {"role": "system", "cnt": system_prompt},
-        {"role": "user", "cnt": user_prompt}
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
     ]
 
     inputs = tokenizer.apply_chat_template(
@@ -752,7 +749,7 @@ def _llm_generate_single_explanation(db, llm_model, question, explicit_colors_di
     return parsed_answer
 
 def generate_LLM_explanations(db_dir, db, datasets_dir_path, dataset_filename, model_dir, llm_model, llm_tokenizer,
-                              xai_output_path, explicit_colors_dict, question, yes_pred_img_path, no_pred_img_path,
+                              xai_output_path, question, yes_pred_img_path, no_pred_img_path,
                               yes_pred_img_path_small, no_pred_img_path_small, pos_llm_scaffold, neg_llm_scaffold,
                               X_division, Y_division, pattern_dict=None, device="cuda:0", dataset_size=None,
                               only_for_index=None, path_to_counterfactuals_dir_for_model_errors=None,
@@ -767,7 +764,6 @@ def generate_LLM_explanations(db_dir, db, datasets_dir_path, dataset_filename, m
     :param llm_model: llm model to use for inference.
     :param llm_tokenizer: llm tokenizer.
     :param xai_output_path: path where to save the results.
-    :param explicit_colors_dict: dictionary that associates color hex codes with their explicit name.
     :param question: question corresponding to the given model.
     :param yes_pred_img_path: path to the image that represents the yes prediction.
     :param no_pred_img_path: path to the image that represents the no prediction.
@@ -800,7 +796,7 @@ def generate_LLM_explanations(db_dir, db, datasets_dir_path, dataset_filename, m
 
     index_list = range(len(X)) if only_for_index is None else only_for_index
     for sample_idx in tqdm.tqdm(index_list):
-        expl_str = _llm_generate_single_explanation(db, llm_model, question, explicit_colors_dict, llm_tokenizer,
+        expl_str = _llm_generate_single_explanation(db, llm_model, question, llm_tokenizer,
                                                     dataset, y[sample_idx], y_pred[sample_idx], sample_idx,
                                                     path_to_counterfactuals_dir_for_model_errors, pos_llm_scaffold,
                                                     neg_llm_scaffold, division_X=X_division, division_Y=Y_division,

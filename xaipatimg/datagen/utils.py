@@ -66,8 +66,8 @@ class PatImgObj:
     def __init__(self, img_dict):
         self.path = img_dict['path']
         self.size = img_dict['size']
-        self.division = img_dict['division']
-        self.img_content = copy.deepcopy(img_dict['content'])
+        self.division = img_dict['div']
+        self.img_content = copy.deepcopy(img_dict['cnt'])
 
         self.img_content_arr = np.full(self.division, None)
 
@@ -242,9 +242,9 @@ class PatImgObj:
                     continue
 
                 shape_match = (
-                    shape is None or current_symbol['shape'] == shape)
+                    shape is None or current_symbol['shp'] == shape)
                 color_match = (
-                    color is None or current_symbol['color'] == color)
+                    color is None or current_symbol['col'] == color)
 
                 if shape_match and color_match:
                     found_symbols.append(current_symbol)

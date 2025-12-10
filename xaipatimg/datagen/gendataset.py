@@ -10,13 +10,14 @@ from sklearn.model_selection import train_test_split
 
 from xaipatimg.datagen.utils import PatImgObj
 
-def create_dataset_based_on_rule(db_dir, datasets_dir_path, csv_filename_train, csv_filename_test, csv_filename_valid,
+
+def create_dataset_based_on_rule(db, datasets_dir_path, csv_filename_train, csv_filename_test, csv_filename_valid,
                                  test_size, valid_size, dataset_pos_samples_nb, dataset_neg_samples_nb, rule_fun,
-                                 random_seed=42, filter_on_dim=None, n_jobs=1, **kwargs):
+                                 random_seed=42, n_jobs=1, **kwargs):
     """
     Function that creates a training dataset based on the rule that is defined in the rule_fun function. The dataset is
     saved as a csv file and contains a given number of positive and negative samples.
-    :param db_dir: path to the root directory of the database.
+    :param db: database object.
     :param datasets_dir_path: path to the directory where the datasets will be saved.
     :param csv_filename_train: name of the csv file that contains the training dataset.
     :param csv_filename_test: name of the csv file that contains the testing dataset.
@@ -28,45 +29,28 @@ def create_dataset_based_on_rule(db_dir, datasets_dir_path, csv_filename_train, 
     :param dataset_neg_samples_nb: number of negative samples to be contained in the dataset.
     :param rule_fun: boolean function that defines whether the given image content is positive or negative.
     :param random_seed: seed which is used for dataset random ordering.
-    :param filter_on_dim: if tuple (xdim, ydim), only the images with this dimension will be considered.
     :param n_jobs: number of jobs to run in parallel.
     :return: None
     """
-    # Load and shuffle images content
-    db = load_db(db_dir)
-    img_content_list = list(db.values())
-    np.random.seed(random_seed)
-    np.random.shuffle(img_content_list)
 
     pos_list = []
     neg_list = []
     pos_nb = 0
     neg_nb = 0
 
-    if filter_on_dim is None:
-        filtred_img_content_list = img_content_list
-    else:
-        filtred_img_content_list = []
-        for img_content in img_content_list:
-            if img_content["div"] == filter_on_dim:
-                filtred_img_content_list.append(img_content)
+    for k, v in db.items():
 
-    # Extracting positive and negative samples
-    return_values = Parallel(n_jobs=n_jobs)(delayed(rule_fun)(
-        img_content["cnt"], **kwargs) for img_content in tqdm.tqdm(filtred_img_content_list))
+        is_positive, is_excluded = rule_fun(v["cnt"], **kwargs)
 
-    is_positive, is_excluded = zip(*return_values)
-
-    for img_idx in range(len(img_content_list)):
-
-        if is_positive[img_idx]:
-            if pos_nb < dataset_pos_samples_nb:
-                pos_list.append(filtred_img_content_list[img_idx]["path"])
-            pos_nb += 1
-        elif not is_excluded[img_idx]:
-            if neg_nb < dataset_neg_samples_nb:
-                neg_list.append(filtred_img_content_list[img_idx]["path"])
-            neg_nb += 1
+        if not is_excluded:
+            if is_positive:
+                if pos_nb < dataset_pos_samples_nb:
+                    pos_list.append(v["path"])
+                    pos_nb += 1
+            else:
+                if neg_nb < dataset_neg_samples_nb:
+                    neg_list.append(v["path"])
+                    neg_nb += 1
 
         if pos_nb >= dataset_pos_samples_nb and neg_nb >= dataset_neg_samples_nb:
             break
@@ -76,7 +60,7 @@ def create_dataset_based_on_rule(db_dir, datasets_dir_path, csv_filename_train, 
 
     if len(pos_list) != dataset_pos_samples_nb or len(neg_list) != dataset_neg_samples_nb:
         raise RuntimeError("Could not extract enough positive (" + str(pos_nb) + "/" + str(dataset_pos_samples_nb) +
-                           ") or negative (" + str(neg_nb) + "/" + str(dataset_neg_samples_nb) +") samples.")
+                           ") or negative (" + str(neg_nb) + "/" + str(dataset_neg_samples_nb) + ") samples.")
 
     # Forming dataset content
     y = np.concatenate((np.full(len(pos_list), 1), np.full(len(neg_list), 0)), axis=0)
@@ -114,6 +98,7 @@ def create_dataset_based_on_rule(db_dir, datasets_dir_path, csv_filename_train, 
         writer = csv.writer(f)
         writer.writerows(csv_content_valid)
 
+
 def extract_sample_from_dataset(db_dir, datasets_dir_path, csv_filename, output_dir_path, pos_samples_nb,
                                 neg_samples_nb):
     """
@@ -150,6 +135,7 @@ def extract_sample_from_dataset(db_dir, datasets_dir_path, csv_filename, output_
                 shutil.copyfile(os.path.join(db_dir, row[0]), os.path.join(neg_dir_path, os.path.basename(row[0])))
                 neg_nb += 1
 
+
 def _extract_rows_with_only_shape_or_color(img_content, y_division, shape=None, color=None):
     """
     Returns the rows which only contain the given shape or color
@@ -160,11 +146,11 @@ def _extract_rows_with_only_shape_or_color(img_content, y_division, shape=None, 
     :return: The rows which only contain the given shape or color, the count of symbols matching the pattern for every
     row, the count of symbols not matching the pattern for every row.
     """
-    pattern_counter = np.zeros(y_division,)
-    non_pattern_counter = np.zeros(y_division,)
+    pattern_counter = np.zeros(y_division, )
+    non_pattern_counter = np.zeros(y_division, )
 
     for c in img_content:
-        if shape is not None :
+        if shape is not None:
             if c["shp"] == shape:
                 pattern_counter[c["pos"][1]] += 1
                 continue
@@ -178,6 +164,7 @@ def _extract_rows_with_only_shape_or_color(img_content, y_division, shape=None, 
 
     return np.logical_and(pattern_counter >= 1, non_pattern_counter == 0), pattern_counter, non_pattern_counter
 
+
 def _extract_cols_with_only_shape_or_color(img_content, x_division, shape=None, color=None):
     """
     Returns the col which only contain the given shape or color
@@ -187,11 +174,11 @@ def _extract_cols_with_only_shape_or_color(img_content, x_division, shape=None, 
     :param x_division: number of x divisions in the image.
     :return:
     """
-    pattern_counter = np.zeros(x_division,)
-    non_pattern_counter = np.zeros(x_division,)
+    pattern_counter = np.zeros(x_division, )
+    non_pattern_counter = np.zeros(x_division, )
 
     for c in img_content:
-        if shape is not None :
+        if shape is not None:
             if c["shp"] == shape:
                 pattern_counter[c["pos"][0]] += 1
                 continue
@@ -205,6 +192,7 @@ def _extract_cols_with_only_shape_or_color(img_content, x_division, shape=None, 
 
     return np.logical_and(pattern_counter >= 1, non_pattern_counter == 0)
 
+
 def generic_rule_exist_row_with_only_shape(img_content, shape, y_division):
     """
     Returns True iff there is at least one row in the given image that only contains the given shape.
@@ -215,6 +203,7 @@ def generic_rule_exist_row_with_only_shape(img_content, shape, y_division):
     """
     match, _, _ = _extract_rows_with_only_shape_or_color(img_content, y_division, shape=shape)
     return np.sum(match) >= 1, False
+
 
 def generic_rule_exist_row_with_only_color(img_content, color, y_division):
     """
@@ -227,6 +216,7 @@ def generic_rule_exist_row_with_only_color(img_content, color, y_division):
     match, _, _ = _extract_rows_with_only_shape_or_color(img_content, y_division, color=color)
     return np.sum(match) >= 1, False
 
+
 def generic_rule_exist_column_with_only_shape(img_content, shape, x_division):
     """
     Returns True iff there is at least one row in the given image that only contains the given shape.
@@ -236,6 +226,7 @@ def generic_rule_exist_column_with_only_shape(img_content, shape, x_division):
     :return: respects rule, is_excluded (no exclusion criteria)
     """
     return np.sum(_extract_cols_with_only_shape_or_color(img_content, x_division, shape=shape)) >= 1, False
+
 
 def generic_rule_exist_row_with_only_color_and_col_with_only_shape(img_content, color, shape, x_division, y_division):
     """
@@ -249,7 +240,8 @@ def generic_rule_exist_row_with_only_color_and_col_with_only_shape(img_content, 
     :return: respects rule, is_excluded (no exclusion criteria)
     """
     return generic_rule_exist_row_with_only_color(img_content, color, y_division) \
-        and generic_rule_exist_column_with_only_shape(img_content, shape, x_division), False
+           and generic_rule_exist_column_with_only_shape(img_content, shape, x_division), False
+
 
 def generic_rule_N_times_color_exactly(img_content, N, color, x_division, y_division):
     """
@@ -261,6 +253,7 @@ def generic_rule_N_times_color_exactly(img_content, N, color, x_division, y_divi
     """
     obj = PatImgObj({"cnt": img_content, "div": (x_division, y_division), "path": None, "size": None})
     return len(obj.get_symbols_by(color=color)) == N, False
+
 
 def generic_rule_N_times_color_shape_exactly(img_content, N, color, shape, x_division, y_division,
                                              restrict_plus_minus_1=False):
@@ -280,7 +273,8 @@ def generic_rule_N_times_color_shape_exactly(img_content, N, color, shape, x_div
 
     count = len(obj.get_symbols_by(color=color, shape=shape))
     exclusion = (count < N - 1 or count > N + 1) if restrict_plus_minus_1 else False
-    return  count == N, exclusion
+    return count == N, exclusion
+
 
 def generic_rule_shape_color_plus_shape_equals_N(img_content, shape1, color1, shape2, N, x_division, y_division):
     """
@@ -298,6 +292,7 @@ def generic_rule_shape_color_plus_shape_equals_N(img_content, shape1, color1, sh
     obj = PatImgObj({"cnt": img_content, "div": (x_division, y_division), "path": None, "size": None})
     return len(obj.get_symbols_by(shape=shape1, color=color1)) + len(obj.get_symbols_by(shape=shape2)) == N, False
 
+
 def generic_rule_shape_color_times_2_shape_equals_shape(img_content, shape1, color1, shape2, x_division, y_division):
     """
     Return true iff the number of instances of the given color and shape multiplied by 2 equals to the number of
@@ -313,6 +308,7 @@ def generic_rule_shape_color_times_2_shape_equals_shape(img_content, shape1, col
     """
     obj = PatImgObj({"cnt": img_content, "div": (x_division, y_division), "path": None, "size": None})
     return len(obj.get_symbols_by(shape=shape1, color=color1)) * 2 == len(obj.get_symbols_by(shape=shape2)), False
+
 
 def generic_rule_shape_color_even(img_content, color, shape, x_division, y_division):
     """
@@ -386,15 +382,17 @@ def generic_rule_pattern_exactly_N_times(img_content, pattern_content, N, x_divi
     return len(submatrixes_positions) == N, False
 
 
-def create_dataset_generic_rule_extract_sample(db_dir, datasets_dir_path, csv_name_train, csv_name_test, csv_name_valid,
-                                               test_size, valid_size, dataset_pos_samples_nb, dataset_neg_samples_nb,
-                                               sample_path, sample_nb_per_class, generic_rule_fun, filter_on_dim=None,
-                                               n_jobs=1, **kwargs):
+def create_dataset_generic_rule_extract_sample(db_dir, db, datasets_dir_path, csv_name_train, csv_name_test,
+                                               csv_name_valid, test_size, valid_size, dataset_pos_samples_nb,
+                                               dataset_neg_samples_nb,
+                                               sample_path, sample_nb_per_class, generic_rule_fun,
+                                               n_jobs=1, extract_sample=True, **kwargs):
     """
     Creating a dataset with the given characteristics and following the given generic rule, and extracting a sample
     of positive and negative instances.
 
     :param db_dir: path to the root directory of the database.
+    :param db_dir: database object.
     :param datasets_dir_path: path to the root directory of the dataset.
     :param csv_name_train: path to the csv file indexing training dataset.
     :param csv_name_test: path to the csv file indexing test dataset.
@@ -406,20 +404,21 @@ def create_dataset_generic_rule_extract_sample(db_dir, datasets_dir_path, csv_na
     :param sample_path: directory where to save the sample of the dataset.
     :param sample_nb_per_class: size of the sample for each class.
     :param generic_rule_fun: generic rule function that is used to generate the dataset.
-    :param filter_on_dim: if tuple (xdim, ydim), only samples with given dimension will be considered.
     :param n_jobs: number of jobs to run in parallel.
+    :param extract_sample: whether to extract a sample of images in addition to generating the csv dataset.
     :param kwargs: kwargs to give to the generic rule function.
     :return:
     """
 
     # Dataset generation
-    create_dataset_based_on_rule(db_dir, datasets_dir_path, csv_name_train, csv_name_test, csv_name_valid,
+    create_dataset_based_on_rule(db, datasets_dir_path, csv_name_train, csv_name_test, csv_name_valid,
                                  test_size=test_size, valid_size=valid_size,
                                  dataset_pos_samples_nb=dataset_pos_samples_nb,
                                  dataset_neg_samples_nb=dataset_neg_samples_nb,
-                                 rule_fun=generic_rule_fun, filter_on_dim=filter_on_dim, n_jobs=n_jobs,
+                                 rule_fun=generic_rule_fun, n_jobs=n_jobs,
                                  **kwargs)
 
-    # Sample extraction
-    extract_sample_from_dataset(db_dir, datasets_dir_path, csv_name_train, sample_path, sample_nb_per_class,
-                                sample_nb_per_class)
+    if extract_sample:
+        # Sample extraction
+        extract_sample_from_dataset(db_dir, datasets_dir_path, csv_name_train, sample_path, sample_nb_per_class,
+                                    sample_nb_per_class)
