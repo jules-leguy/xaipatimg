@@ -33,6 +33,26 @@ def get_coords_diff(patimgobj1, patimgobj2):
                 coords_list.append((x, y))
     return coords_list
 
+def rotate(img_content, x_division, y_division, direction=None):
+    """
+    Rotating the content of the given image. If direction == 1, rotating right. If direction == -1, rotating left.
+    Direction == 2 corresponds to a 180° rotation (=2 consecutive rotations to the left or right).
+    :param img_content:
+    :param direction:
+    :return:
+    """
+    new_img_content = copy.deepcopy(img_content)
+
+    for c in new_img_content:
+        if direction == 1:
+            c["pos"] = [y_division - 1 - c["pos"][1], c["pos"][0]]
+        elif direction == -1:
+            c["pos"] = [c["pos"][1], x_division - 1 - c["pos"][0]]
+        elif direction == 2:
+            c["pos"] = [x_division - 1 - c["pos"][0], y_division - 1 - c["pos"][1]]
+
+    return new_img_content
+
 def random_mutation(img_dict, depth, shapes, colors, empty_probability):
     """
     Performing random mutations in the given image.
@@ -117,26 +137,6 @@ class PatImgObj:
         of the pattern are s
         :return:
         """
-
-        def rotate(img_content, x_division, y_division, direction=None):
-            """
-            Rotating the content of the given image. If direction == 1, rotating right. If direction == -1, rotating left.
-            Direction == 2 corresponds to a 180° rotation (=2 consecutive rotations to the left or right).
-            :param img_content:
-            :param direction:
-            :return:
-            """
-            new_img_content = copy.deepcopy(img_content)
-
-            for c in new_img_content:
-                if direction == 1:
-                    c["pos"] = [y_division - 1 - c["pos"][1], c["pos"][0]]
-                elif direction == -1:
-                    c["pos"] = [c["pos"][1], x_division - 1 - c["pos"][0]]
-                elif direction == 2:
-                    c["pos"] = [x_division - 1 - c["pos"][0], y_division - 1 - c["pos"][1]]
-
-            return new_img_content
 
         # If consider_rotations is True, returning the concatenation of indices of the left rotation of the submatrix, the original submatrix, the
         # right rotation of the submatrix and the 180° rotation of the submatrix.

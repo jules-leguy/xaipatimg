@@ -80,15 +80,22 @@ def _copy_images(db, model_dir, res_dir, name, idx_selected, img_paths, AI_paths
 
     # Copying images for all selected samples
     for idx in range(len(idx_selected)):
+
         shutil.copyfile(os.path.join(db, img_paths[idx]),
                         os.path.join(img_dir, str(idx_selected[idx]) + ".png"))
-        shutil.copyfile(os.path.join(model_dir, name, AI_paths[idx]),
-                        os.path.join(AI_dir, str(idx_selected[idx]) + ".png"))
+
+        try:
+            shutil.copyfile(os.path.join(model_dir, name, AI_paths[idx]),
+                            os.path.join(AI_dir, str(idx_selected[idx]) + ".png"))
+        except FileNotFoundError:
+            print(f"Warning : AI image missing for {name}")
 
         for XAI_key, XAI_paths in XAI_col_path_dict.items():
-            shutil.copyfile(os.path.join(model_dir, name, XAI_paths[idx]),
-                            os.path.join(res_dir, "xai_" + XAI_key, name, str(idx_selected[idx]) + ".png"))
-
+            try:
+                shutil.copyfile(os.path.join(model_dir, name, XAI_paths[idx]),
+                                os.path.join(res_dir, "xai_" + XAI_key, name, str(idx_selected[idx]) + ".png"))
+            except FileNotFoundError:
+                print(f"Warning : XAI image ({XAI_key}) missing for {name}")
     # Copying images for examples
     shutil.copyfile(os.path.join(db, pos_example_path), os.path.join(img_dir, "pos_example.png"))
     shutil.copyfile(os.path.join(db, neg_example_path), os.path.join(img_dir, "neg_example.png"))
@@ -147,13 +154,14 @@ def _is_error(y, y_pred):
 def _is_pos(y):
     return y == 1
 
-def _sample_instances(y, y_pred, sample_size, shown_accuracy):
+def _sample_instances(y, y_pred, sample_size, shown_accuracy, balanced_fn_fp_errors=False):
     """
     Performing the sampling of data.
     :param y: vector of true labels.
     :param y_pred: vector of predicted labels.
     :param sample_size: size of the sample to generate.
     :param shown_accuracy: proportion of positive samples in the generated set.
+    :param balanced_fn_fp_errors: whether to use balanced sampling for false negatives and false positives.
     :return: index of samples selected, index of samples not selected.
     """
 
@@ -170,9 +178,19 @@ def _sample_instances(y, y_pred, sample_size, shown_accuracy):
     n_correct_target = round(sample_size*shown_accuracy)
     n_errors_target = sample_size-n_correct_target
 
+    # Calculating the number of FN and FP errors (if uneven, the majority class is selected randomly).
+    if random.random() < 0.5:
+        n_fp_errors_target = n_errors_target // 2
+        n_fn_errors_target = n_errors_target - n_fp_errors_target
+    else:
+        n_fn_errors_target = n_errors_target // 2
+        n_fp_errors_target = n_errors_target - n_fn_errors_target
+
     n_pos_selected = 0
     n_neg_selected = 0
     n_errors_selected = 0
+    n_fp_errors_selected = 0
+    n_fn_errors_selected = 0
 
     # Generating random index of all samples
     all_samples_idx = np.arange(len(y))
@@ -186,14 +204,18 @@ def _sample_instances(y, y_pred, sample_size, shown_accuracy):
 
             if _is_pos(y[idx]):
                 if n_pos_selected < n_pos_target:
-                    n_pos_selected += 1
-                    idx_selected.append(idx)
-                    n_errors_selected += 1
+                    if n_fn_errors_selected < n_fn_errors_target or not balanced_fn_fp_errors:
+                        n_pos_selected += 1
+                        idx_selected.append(idx)
+                        n_errors_selected += 1
+                        n_fn_errors_selected += 1
             else:
                 if n_neg_selected < n_neg_target:
-                    n_neg_selected += 1
-                    idx_selected.append(idx)
-                    n_errors_selected += 1
+                    if n_fp_errors_selected < n_fp_errors_target or not balanced_fn_fp_errors:
+                        n_neg_selected += 1
+                        idx_selected.append(idx)
+                        n_errors_selected += 1
+                        n_fp_errors_selected += 1
 
         if n_errors_selected == n_errors_target:
             break
@@ -229,7 +251,7 @@ def _sample_instances(y, y_pred, sample_size, shown_accuracy):
     return idx_selected, idx_not_selected
 
 def generate_resources_dir(db_dir, interface_dir, model_dir, models_names_list, tasks_q_list, XAI_names_list,
-                           shown_accuracy_list, samples_nb_interface_list, random_seed=42):
+                           shown_accuracy_list, samples_nb_interface_list, random_seed=42, balanced_fn_fp_errors=False):
     """
     Generating the resources directory which is used in the experimental interface (WebXAII).
 
@@ -242,6 +264,7 @@ def generate_resources_dir(db_dir, interface_dir, model_dir, models_names_list, 
     :param shown_accuracy_list: list of target accuracy that was used when training the models.
     :param samples_nb_interface_list: list of number of samples to generate for the interface for each model.
     :param random_seed: random seed used for sampling.
+    :param balanced_fn_fp_errors: whether to use balanced sampling for false negatives and false positives.
     :return:
     """
 
@@ -279,7 +302,8 @@ def generate_resources_dir(db_dir, interface_dir, model_dir, models_names_list, 
             sample_size = samples_nb_interface_list[model_idx]
             shown_accuracy = shown_accuracy_list[model_idx]
             idx_selected, idx_not_selected = _sample_instances(data_d["y"], data_d["y_pred"], sample_size,
-                                                               shown_accuracy)
+                                                               shown_accuracy,
+                                                               balanced_fn_fp_errors=balanced_fn_fp_errors)
 
             # Extracting a positive example and a negative example (which are not part of the sampled data)
             pos_example_path, neg_example_path = _select_examples(data_d, idx_not_selected)
