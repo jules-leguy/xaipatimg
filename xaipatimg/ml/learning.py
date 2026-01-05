@@ -1,7 +1,7 @@
+import sys
 from datetime import datetime
 from os.path import join
 import json
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -18,12 +18,11 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import transforms
 
 from xaipatimg.ml import resnet18_preprocess_no_norm
-# from xaipatimg.ml.xai import _create_dirs, _get_subfolder
 
 
 class PatImgDataset(torch.utils.data.Dataset):
     def __init__(self, db_dir, datasets_dir_path, csv_dataset_filename, transform=None, target_transform=None,
-                 max_size=None):
+                 max_size=None, keep_images_in_cache=False):
         """
         Initialize the dataset object.
         :param db_dir: path to the root directory of the database
@@ -31,6 +30,7 @@ class PatImgDataset(torch.utils.data.Dataset):
         :param transform: pipeline for transforming input data
         :param target_transform: pipeline for transforming labels
         :param max_size: if not None, the maximum number of images to load
+        :param keep_images_in_cache: if True, keeping all images in memory
         """
         self.db_dir = db_dir
         self.datasets_dir_path = datasets_dir_path
@@ -45,13 +45,14 @@ class PatImgDataset(torch.utils.data.Dataset):
             self.img_list = self.img_list[:max_size]
             self.img_labels = self.img_labels[:max_size]
 
-        print("Loading dataset content for " + csv_dataset_filename)
-        for idx in tqdm.tqdm(range(len(self.img_list))):
-            img_path = os.path.join(self.db_dir, self.img_list[idx])
-            image = Image.open(img_path)
-            if self.transform is not None:
-                image = self.transform(image)
-            self.images_cache.append(image)
+        if keep_images_in_cache:
+            print("Loading dataset content for " + csv_dataset_filename)
+            for idx in tqdm.tqdm(range(len(self.img_list))):
+                img_path = os.path.join(self.db_dir, self.img_list[idx])
+                image = Image.open(img_path)
+                if self.transform is not None:
+                    image = self.transform(image)
+                self.images_cache.append(image)
 
     def __len__(self):
         """
@@ -66,10 +67,19 @@ class PatImgDataset(torch.utils.data.Dataset):
         :param idx: index
         :return: X, y
         """
-        image = self.images_cache[idx]
+
+        if self.images_cache:
+            image = self.images_cache[idx]
+        else:
+            img_path = os.path.join(self.db_dir, self.img_list[idx])
+            image = Image.open(img_path)
+            if self.transform is not None:
+                image = self.transform(image)
+
         label = self.img_labels[idx]
         if self.target_transform:
             label = self.target_transform(label)
+
         return image, label
 
     def get_path(self, idx):
@@ -118,13 +128,25 @@ def compute_mean_std_dataset(db_dir, datasets_dir_path, dataset_filename, prepro
     """
     dataset_no_norm = PatImgDataset(
         db_dir, datasets_dir_path, dataset_filename, transform=preprocess_no_norm)
-    alldata_no_norm = np.array([dataset_no_norm[i][0]
-                               for i in range(len(dataset_no_norm))])
-    means = [np.mean(x).astype(float) for x in
-             [alldata_no_norm[:, channel, :] for channel in range(alldata_no_norm.shape[1])]]
-    stds = [np.std(x).astype(float) for x in
-            [alldata_no_norm[:, channel, :] for channel in range(alldata_no_norm.shape[1])]]
-    return means, stds
+
+    loader = torch.utils.data.DataLoader(dataset_no_norm, batch_size=100, shuffle=False)
+
+    count = 0
+    mean = 0.0
+    sqmean = 0.0
+
+    for x, _ in tqdm.tqdm(loader):
+        # x: [B, C, H, W]
+        b, c, h, w = x.shape
+        pixels = b * h * w
+        count += pixels
+
+        mean += x.sum(dim=[0, 2, 3])
+        sqmean += (x ** 2).sum(dim=[0, 2, 3])
+
+    mean /= count
+    std = (sqmean / count - mean ** 2).sqrt()
+    return mean.numpy().tolist(), std.numpy().tolist()
 
 def _check_early_stopping(vaccuracy, target_accuracy, current_loss, best_loss, counter, patience, model, model_dir, mode, step):
     """
@@ -221,7 +243,8 @@ def train_resnet_model(db_dir, datasets_dir_path, train_dataset_filename, valid_
     ])
 
     dataset_train = PatImgDataset(db_dir, datasets_dir_path, train_dataset_filename, transform=preprocess)
-    dataset_valid = PatImgDataset(db_dir, datasets_dir_path, valid_dataset_filename, transform=preprocess)
+    dataset_valid = PatImgDataset(db_dir, datasets_dir_path, valid_dataset_filename, transform=preprocess,
+                                  keep_images_in_cache=True)
     training_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
     valid_loader = torch.utils.data.DataLoader(dataset_valid, batch_size=batch_size, shuffle=False)
 

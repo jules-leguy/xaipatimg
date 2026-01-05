@@ -18,6 +18,7 @@ from xaipatimg.datagen import COLORS_EXPLICIT_NAMES_MAP, SHAPES_MAP
 
 from xaipatimg.datagen.dbimg import load_db
 from xaipatimg.datagen.genimg import gen_img
+from xaipatimg.datagen.jsondb import JSONDB
 from xaipatimg.datagen.utils import get_coords_diff, PatImgObj, random_mutation
 from xaipatimg.ml import resnet18_preprocess_no_norm
 from xaipatimg.ml._colors import red_transparent_green
@@ -464,7 +465,7 @@ def generate_counterfactuals_resnet_random_approach(db_dir, datasets_dir_path, d
     X, y, y_pred, model = _predict(model_dir, devices[0], dataset, resnet_type=resnet_type)
 
     # Load database
-    db = load_db(db_dir)
+    db = JSONDB(os.path.join(db_dir, "db.json"))
 
     # Parallel computation of the images for the whole dataset.
     print("Generating counterfactual images")
