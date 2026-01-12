@@ -11,7 +11,7 @@ import shap
 from pytorch_grad_cam import GradCAM
 import torch
 from pytorch_grad_cam.utils.image import show_cam_on_image
-from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget, BinaryClassifierOutputTarget
 from PIL import Image, ImageFont, ImageDraw
 import matplotlib.pyplot as plt
 from xaipatimg.datagen import COLORS_EXPLICIT_NAMES_MAP, SHAPES_MAP
@@ -19,7 +19,7 @@ from xaipatimg.datagen import COLORS_EXPLICIT_NAMES_MAP, SHAPES_MAP
 from xaipatimg.datagen.dbimg import load_db
 from xaipatimg.datagen.genimg import gen_img
 from xaipatimg.datagen.jsondb import JSONDB
-from xaipatimg.datagen.utils import get_coords_diff, PatImgObj, random_mutation
+from xaipatimg.datagen.utils import get_coords_diff, PatImgObj, random_mutation, rotate
 from xaipatimg.ml import resnet18_preprocess_no_norm
 from xaipatimg.ml._colors import red_transparent_green
 from xaipatimg.ml.learning import get_dataset_transformed, make_prediction, load_resnet_based_model
@@ -211,19 +211,23 @@ def _generate_displayable_explanation(model_pred, explanation_img, yes_pred_img_
     canvas.save(out_path)
 
 
-def generate_cam_resnet18(cam_technique, db_dir, datasets_dir_path, dataset_filename, model_dir, device="cuda:0"):
+def generate_cam_resnet18(cam_technique, db_dir, xai_output_path, datasets_dir_path, dataset_filename, model_dir,
+                          yes_pred_img_path, no_pred_img_path, dataset_size=None, device="cuda:0"):
     """
     Generating cam images for given model on test set, which are saved into the model directory.
     :param cam_technique: description of the cam technique (str) to use to generate explanations
     :param db_dir: root of the database.
+    :param xai_output_path: root of the xai output directory.
     :param datasets_dir_path: path where the datasets are located
     :param model_dir: path of the model directory.
+    :param yes_pred_img_path: path to the image that represent a yes prediction
+    :param no_pred_img_path: path to the image that represent a no prediction
     :param dataset_filename: filename of the dataset.
+    :param dataset_size: size of the dataset.
     :param device: device to use for pytorch computation.
 
     :return:
     """
-
     # Selecting cam method
     if cam_technique.lower() == "gradcam":
         cam_fun = GradCAM
@@ -231,14 +235,13 @@ def generate_cam_resnet18(cam_technique, db_dir, datasets_dir_path, dataset_file
         raise RuntimeError("Unknown cam technique")
 
     # Creating directories
-    xai_output_path = os.path.join(model_dir, "xai_" + pathlib.Path(dataset_filename).stem + "_" + cam_technique)
     _create_dirs(xai_output_path)
 
     # Loading data
-    dataset = get_dataset_transformed(db_dir, datasets_dir_path, model_dir, dataset_filename)
+    dataset = get_dataset_transformed(db_dir, datasets_dir_path, model_dir, dataset_filename, max_size=dataset_size)
 
     # Make prediction
-    X, y, _, model = _predict(model_dir, device, dataset)
+    X, y, _, model = _predict(model_dir, device, dataset, resnet_type="resnet18")
 
     input_tensor = torch.from_numpy(X)
     input_tensor.to(device)
@@ -246,29 +249,36 @@ def generate_cam_resnet18(cam_technique, db_dir, datasets_dir_path, dataset_file
 
     # Selecting layers where to apply CAM
     target_layers = [model.layer4[-1]]
+    # target_layers = [model.layer3[-1]]
 
     # Iterating over all images and targets
-    for i in range(len(X)):
-        for j, targets in enumerate([[ClassifierOutputTarget(0)], [ClassifierOutputTarget(1)]]):
-            with cam_fun(model=model, target_layers=target_layers) as cam:
-                # Generating the saliency map
-                grayscale_cam = cam(input_tensor=input_tensor[i:1 + i], targets=targets)
+    for i in tqdm.tqdm(range(len(X))):
+        with cam_fun(model=model, target_layers=target_layers) as cam:
+            # Generating the saliency map
+            grayscale_cam = cam(input_tensor=input_tensor[i:1 + i], targets=[ClassifierOutputTarget(1)])
 
-                # Making the prediction with the model
-                y_pred, _ = make_prediction(model, input_tensor[i:1 + i], device)
+            # Making the prediction with the model
+            y_pred, _ = make_prediction(model, input_tensor[i:1 + i], device)
 
-                # Reading and resizing the current input image
-                bgr_img = cv2.imread(paths_list[i], 1)
-                bgr_img = cv2.resize(bgr_img, (256, 256))
+            # Reading and resizing the current input image
+            img = Image.open(paths_list[i]).convert("RGB")
+            img = img.resize((256, 256))
+            rgb_img = np.array(img) / 255.0  # shape (H, W, 3), float in [0,1]
 
-                # Writing input image to filesystem
-                cv2.imwrite(os.path.join(xai_output_path, str(i) + ".jpg"), bgr_img)
+            # Writing input image to filesystem
+            img.save(os.path.join(xai_output_path, str(i) + "og_.png"))
 
-                # Writing cam merged on image to filesystem
-                bgr_img = np.float32(bgr_img) / 255
-                visualization = show_cam_on_image(bgr_img, grayscale_cam[0], use_rgb=False)
-                cv2.imwrite(os.path.join(xai_output_path, str(i) + "_target_" + str(j) + ".jpg"), visualization)
+            # Writing cam merged on image to filesystem
+            visualization = show_cam_on_image(rgb_img, grayscale_cam[0], use_rgb=True, image_weight=0.5)
+            pil_visualization = Image.fromarray(visualization)
 
+            # pil_visualization.save(os.path.join(xai_output_path, str(i) + ".png"))
+
+            # Generating displayable image with the decision of the model
+            output_img_path = os.path.join(xai_output_path, str(i) + ".png")
+            _generate_displayable_explanation(y_pred, pil_visualization, yes_pred_img_path, no_pred_img_path,
+                                              output_img_path, output_size=(600, 400), left_ratio=0.35, font_size=20,
+                                              padding=5)
 
 def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_pred, shap_values_lim,
                         shap_scale_img_path, yes_pred_img_path, no_pred_img_path):
@@ -337,8 +347,8 @@ def _shap_single_sample(sample_idx, shap_values, img_numpy, xai_output_path, y_p
 
 
 def generate_shap_resnet(db_dir, datasets_dir_path, dataset_filename, model_dir, xai_output_path, yes_pred_img_path,
-                           no_pred_img_path, device="cuda:0", n_jobs=-1, dataset_size=None, masker="blur(128,128)",
-                           shap_scale_img_path=None, max_evals=10000, resnet_type="resnet18"):
+                         no_pred_img_path, device="cuda:0", n_jobs=-1, dataset_size=None, masker="blur(128,128)",
+                         shap_scale_img_path=None, max_evals=10000, resnet_type="resnet18"):
     """
     Generating shap explanations for the given model and dataset, which are stored into the model directory.
     :param db_dir: root of the database.
@@ -416,11 +426,11 @@ def generate_shap_resnet(db_dir, datasets_dir_path, dataset_filename, model_dir,
 
 
 def generate_counterfactuals_resnet_random_approach(db_dir, datasets_dir_path, dataset_filename, model_dir,
-                                                      xai_output_path, yes_pred_img_path, no_pred_img_path, shapes,
-                                                      colors, empty_probability, max_depth, nb_tries_per_depth,
-                                                      generic_rule_fun, devices, n_jobs=-1, dataset_size=None,
-                                                      pos_pred_legend_path=None, neg_pred_legend_path=None,
-                                                      resnet_type="resnet18", **kwargs):
+                                                    xai_output_path, yes_pred_img_path, no_pred_img_path, shapes,
+                                                    colors, empty_probability, max_depth, nb_tries_per_depth,
+                                                    generic_rule_fun, devices, n_jobs=-1, dataset_size=None,
+                                                    pos_pred_legend_path=None, neg_pred_legend_path=None,
+                                                    resnet_type="resnet18", **kwargs):
     """
     Generating counterfactual explanations for the given model and dataset. Explanations are obtained by assessing
     randomly mutated images. A mutation consists in randomly changing the content of a cell of the image.
@@ -489,7 +499,7 @@ def generate_counterfactuals_resnet_random_approach(db_dir, datasets_dir_path, d
         no_pred_img_path,  # no_pred_img_path
         pos_pred_legend_path,  # pos_pred_legend_path
         neg_pred_legend_path,  # neg_pred_legend_path
-        resnet_type, # resnet_type
+        resnet_type,  # resnet_type
         **kwargs) for i in tqdm.tqdm(range(len(X))))
 
     cf_depths, cf_verified_depths = zip(*return_values)
@@ -637,6 +647,7 @@ def _cf_single_sample_random_approach(db_dir, datasets_dir_path, sample_idx, xai
     # In case no counterfactual was found at any depth, returning None
     return None, None
 
+
 def _llm_generate_single_explanation(db, llm_model, question, tokenizer, dataset, y, y_pred, idx,
                                      path_to_counterfactuals_dir_for_model_errors, pos_llm_scaffold, neg_llm_scaffold,
                                      division_X, division_Y, pattern_dict=None):
@@ -661,58 +672,81 @@ def _llm_generate_single_explanation(db, llm_model, question, tokenizer, dataset
     :return:
     """
 
-    def custom_sort(a):
-        """
-        Custom function to sort dict elements row first then columns
-        :param a:
-        :return:
-        """
-        return a["pos"][1], a["pos"][0]
-
-    # Function that converts the dict image content to an equivalent with explicit color names and using the
-    # (A..F)(1..6) coordinates notation
-    def convert_content(img_content, for_pattern=False):
-
-        # Create dictionaries associating x and y coordinates to the corresponding value in the (A..X)(1..N) coordinates
-        # notation
-        if for_pattern:
-            dict_coords_y = {i: f"N" if i == 0 else f"N+{i}" for i in range(division_Y)}
-            dict_coords_x = {i: f"X" if i == 0 else f"X+{i}" for i in range(division_X)}
-        else:
-            dict_coords_y = {i: str(1 + i) for i in range(division_Y)}
-            dict_coords_x = {i: chr(ord("A") + i) for i in range(division_X)}
+    def convert_content(img_content):
 
         new_content = []
         for shape_content in img_content:
-            new_shape_content = {"shape": SHAPES_MAP[shape_content["shp"]]}
             x_pos, y_pos = shape_content["pos"][0], shape_content["pos"][1]
-            new_coord = dict_coords_x[x_pos] + dict_coords_y[y_pos]
-            new_shape_content["position"] = new_coord
-            new_shape_content["color"] = COLORS_EXPLICIT_NAMES_MAP[shape_content["col"]]
-            new_content.append(new_shape_content)
-
-        # Sorting the elements row-first
-        # new_content = sorted(new_content, key=custom_sort)
+            new_coord = (x_pos, y_pos)
+            new_content.append(
+                f"{new_coord} : {COLORS_EXPLICIT_NAMES_MAP[shape_content["col"]]} {SHAPES_MAP[shape_content["shp"]]}")
 
         return new_content
 
-    pattern_dict_converted = convert_content(pattern_dict, for_pattern=True) if pattern_dict is not None else None
+    def objects_to_sentence(objects):
+        positions = {tuple(o["pos"]) for o in objects}
+
+        def has_diagonal_neighbor(pos):
+            x, y = pos
+            diagonals = [
+                (x - 1, y - 1), (x - 1, y + 1),
+                (x + 1, y - 1), (x + 1, y + 1),
+            ]
+            return any(d in positions for d in diagonals)
+
+        # reference object: the one with no diagonal neighbor
+        ref = next(o for o in objects if not has_diagonal_neighbor(tuple(o["pos"])))
+        rx, ry = ref["pos"]
+        sentences = [f"A {COLORS_EXPLICIT_NAMES_MAP[ref['col']]} {SHAPES_MAP[ref['shp']]}."]
+        directions = {
+            (-1, 0): "left",
+            (1, 0): "right",
+            (0, -1): "top",
+            (0, 1): "bottom",
+        }
+
+        for obj in objects:
+            if obj is ref:
+                continue
+            dx = obj["pos"][0] - rx
+            dy = obj["pos"][1] - ry
+            direction = directions.get((dx, dy))
+            if direction:
+                sentences.append(
+                    f"Just on its {direction}, a {COLORS_EXPLICIT_NAMES_MAP[obj['col']]} {SHAPES_MAP[obj['shp']]}.")
+
+        return " ".join(sentences)
+
+    pattern_dict_right_rot = rotate(pattern_dict, 2, 2, direction=1) if pattern_dict is not None else None
+    pattern_dict_left_rot = rotate(pattern_dict, 2, 2, direction=-1) if pattern_dict is not None else None
+
+    pattern_dict_converted = objects_to_sentence(pattern_dict) if pattern_dict is not None else None
+    pattern_dict_right_rot_converted = objects_to_sentence(pattern_dict_right_rot) if pattern_dict is not None else None
+    pattern_dict_left_rot_converted = objects_to_sentence(pattern_dict_left_rot) if pattern_dict is not None else None
 
     system_prompt = (f"You are the explainability system of an AI model. Your role is to justify the decisions of "
                      f"the model. The role of the model is to answer questions about the content of images of "
-                     f"symbols of colors. The images are described in a JSON data structure. The coordinates "
-                     f"system uses letters from A to F for the columns and numbers from 1 to 6 for the rows. The "
+                     f"symbols of colors. The predictions of the model are always correct. The "
                      f"user will provide you the prediction of the AI model for a given image and the corresponding "
-                     f"JSON data. You need to give an explanation of the prediction. The explanation is expected to be "
+                     f"data. You need to give an explanation of the prediction. The explanation is expected to be "
                      f"a very short sentence which introduces a list of all coordinates that are involved in the model's"
-                     f" prediction. The justification sentence and the list of coordinates must be separated by the "
+                     f" prediction and which will be highlighted from your output. The justification sentence and the list of coordinates "
+                     f"must be separated by the "
                      f"character '|'. The coordinates are separated with the symbol ';', and there is no need to sort them. "
                      f"Do not use escape characters or markdown syntax. The question the model must answer "
                      f"is '{question}'.{f" The pattern to search for is "
-                                        f"{pattern_dict_converted}. Here X correspond to any letter coordinate, and N "
-                                        f"to any number coordinate." if pattern_dict is not None else ""} "
-                     f" Here are examples of justifications for a positive and a negative sample. "
-                     f"Positive : '{pos_llm_scaffold}' Negative : '{neg_llm_scaffold}'")
+                                        f"'{pattern_dict_converted}'. The right rotation of the pattern is "
+                                        f"'{pattern_dict_right_rot_converted}'. The left rotation is "
+                                        f"'{pattern_dict_left_rot_converted}'" if pattern_dict is not None else ""} "
+                     f" Here are examples of justifications for several samples. Positive detection of the pattern with "
+                     f"no rotation : 'The pattern was found and is highlighted below. | (2,5);(3,5);(2,6)'. Positive detection "
+                     f"of the right rotation of the pattern : 'The right rotation of the pattern was found and is "
+                     f"highlighted below. | (2,5);(3,5);(2,6)'. Negative : 'The pattern was not found. Closest matches "
+                     f"are highlighted below. | (2,5);(3,5);(4,6);(4,7)'. "
+                     f"In case the sample is negative, "
+                     f"only highlight close matches with two adjacent symbols of right color and shape (if there are any "
+                     f"such matches). For any coordinate (X,Y), the X component describes the position on the left-right, "
+                     f"and the Y component describes the position on the top-bottom axis. (0,0) is the top left corner.")
 
     print(system_prompt)
 
@@ -720,17 +754,19 @@ def _llm_generate_single_explanation(db, llm_model, question, tokenizer, dataset
     # prediction, so that the class of the sample matches the class predicted by the model.
     if path_to_counterfactuals_dir_for_model_errors is not None and y != y_pred:
         with open(os.path.join(path_to_counterfactuals_dir_for_model_errors, f"{idx}_function.json")) as json_data:
-            img_content = str(convert_content(json.load(json_data)["cnt"]))
+            img_content = convert_content(json.load(json_data)["cnt"])
     # Otherwise loading the image content of the original sample
     else:
         img_id = dataset.get_id(idx)
-        img_content = str(convert_content(db[img_id]["cnt"]))
+        img_content = convert_content(db[img_id]["cnt"])
 
-    user_prompt = f"The AI model predicts {"Yes" if y_pred == 1 else "No"} for the image : {img_content}"
+    user_prompt = f"The AI model predicts {"Yes" if y_pred == 1 else "No"} for the image : {"\n".join(img_content)}"
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt}
     ]
+
+    print(user_prompt)
 
     inputs = tokenizer.apply_chat_template(
         messages,
@@ -740,7 +776,7 @@ def _llm_generate_single_explanation(db, llm_model, question, tokenizer, dataset
     ).to(llm_model.device)
 
     # Performing LLM computation
-    generated = llm_model.generate(**inputs, max_new_tokens=5000)
+    generated = llm_model.generate(**inputs, max_new_tokens=20000)
 
     # Parsing LLM answer
     full_answer = tokenizer.decode(generated[0][inputs["input_ids"].shape[-1]:])
@@ -748,6 +784,7 @@ def _llm_generate_single_explanation(db, llm_model, question, tokenizer, dataset
     parsed_answer = full_answer.partition("<|start|>assistant<|channel|>final<|message|>")[2]
     parsed_answer = parsed_answer.partition("<|return|>")[0]
     return parsed_answer
+
 
 def generate_LLM_explanations(db_dir, db, datasets_dir_path, dataset_filename, model_dir, llm_model, llm_tokenizer,
                               xai_output_path, question, yes_pred_img_path, no_pred_img_path,
@@ -797,15 +834,40 @@ def generate_LLM_explanations(db_dir, db, datasets_dir_path, dataset_filename, m
 
     index_list = range(len(X)) if only_for_index is None else only_for_index
     for sample_idx in tqdm.tqdm(index_list):
+        # expl_str = "The pattern was not found. Closest matches are highlighted below. The pattern was not found. Closest matches are highlighted below. | B5;C5;E6;E7;F7;G7"
         expl_str = _llm_generate_single_explanation(db, llm_model, question, llm_tokenizer,
                                                     dataset, y[sample_idx], y_pred[sample_idx], sample_idx,
                                                     path_to_counterfactuals_dir_for_model_errors, pos_llm_scaffold,
                                                     neg_llm_scaffold, division_X=X_division, division_Y=Y_division,
                                                     pattern_dict=pattern_dict)
 
-        expl_img = generate_llm_text_image(text=expl_str, width=700, height=700, font_size=36, line_spacing=15,
-                                           pred_img_scale=1.8, yes_pred_img_path=yes_pred_img_path_small,
-                                           no_pred_img_path=no_pred_img_path_small, margin=50)
+        def parse_expl_str(expl_str):
+            parsed = expl_str.split("|")
+            justification = parsed[0].strip()
+            coordinates = parsed[1].split(";") if len(parsed[1]) > 0 else []
+
+            return justification, coordinates
+
+        # def coord_str_to_integer(coord_str):
+        #     x = int(ord(coord_str[0]) - ord("A"))
+        #     y = int(coord_str[1:]) - 1
+        #     return x, y
+        def coord_str_to_tuple_integer(coord_str):
+            coord_str = coord_str.replace("(", "")
+            coord_str = coord_str.replace(")", "")
+            coord_str = coord_str.strip()
+            coords_l = coord_str.split(",")
+            x = int(coords_l[0].strip())
+            y = int(coords_l[1].strip())
+            return x, y
+
+        justification, coordinates_str = parse_expl_str(expl_str)
+        coordinates = [coord_str_to_tuple_integer(c.strip()) for c in coordinates_str]
+        img_content = db[dataset.get_id(sample_idx)]
+
+        expl_img = generate_llm_text_image(text=justification, font_size=40, line_spacing=15, margin=15,
+                                           to_highlight=coordinates, full_img_content=img_content["cnt"],
+                                           full_img_division=(X_division, Y_division))
 
         # Saving the images to disk
         output_img_path = os.path.join(xai_output_path, str(sample_idx) + ".png")
