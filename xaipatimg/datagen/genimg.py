@@ -206,7 +206,7 @@ def gen_img(img_path, content, division=(6, 6), dimension=(700, 700), to_highlig
         outer_r = shape_size / 2 + highlight_margin
         draw.ellipse(
             (x_center - outer_r, y_center - outer_r, x_center + outer_r, y_center + outer_r),
-            outline=(153, 153, 153), width=3
+            outline=(255, 165, 0), width=4
         )
 
     # Drawing a question mark into every non-empty cell, if the option is on.
