@@ -136,7 +136,7 @@ def _generate_displayable_explanation(model_pred, explanation_img, yes_pred_img_
         print("Warning: LiberationSans-Regular.ttf not found. Falling back to default font.")
         font = ImageFont.load_default()
 
-    left_title = "AI prediction"
+    left_title = "The AI predicts"
     right_title = "AI justification"
 
     # Measure text
@@ -776,9 +776,9 @@ def _llm_generate_single_explanation(db, llm_model, question, tokenizer, dataset
                                         f"'{pattern_dict_right_rot_converted}'. The left rotation is "
                                         f"'{pattern_dict_left_rot_converted}'" if pattern_dict is not None else ""} "
                      f" Here are examples of justifications for several samples. Positive detection of the pattern with "
-                     f"no rotation : 'The pattern was found and is highlighted below. | (2,5);(3,5);(2,6)'. Positive detection "
-                     f"of the right rotation of the pattern : 'The right rotation of the pattern was found and is "
-                     f"highlighted below. | (2,5);(3,5);(2,6)'. Negative : 'The pattern was not found. Closest matches "
+                     f"no rotation : 'The pattern was found at the location highlighted below | (2,5);(3,5);(2,6)'. Positive detection "
+                     f"of the right rotation of the pattern : 'The right rotation of the pattern was found at the location highlighted below. "
+                     f" | (2,5);(3,5);(2,6)'. Negative : 'The pattern was not found. Closest matches "
                      f"are highlighted below. | (2,5);(3,5);(4,6);(4,7)'. "
                      f"In case the sample is negative, "
                      f"only highlight close matches with two adjacent symbols of right color and shape (if there are any "
