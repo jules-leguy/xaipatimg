@@ -2,6 +2,7 @@ import csv
 import json
 import os
 import pathlib
+import random
 import shutil
 import tempfile
 from os.path import join
@@ -423,6 +424,42 @@ def generate_shap_resnet(db_dir, datasets_dir_path, dataset_filename, model_dir,
         i, shap_values.values[i: i + 1], img_numpy[i: i + 1], xai_output_path, y_pred[i],
         (min_shap_value, max_shap_value), shap_scale_img_path,
         yes_pred_img_path, no_pred_img_path) for i in tqdm.tqdm(range(len(X))))
+
+def generate_weak_xai_resnet_random_approach(db_dir, datasets_dir_path, dataset_filename, model_dir,
+                                             xai_output_path, yes_pred_img_path, no_pred_img_path, shapes,
+                                             colors, empty_probability, max_depth, nb_tries_per_depth,
+                                             generic_rule_fun, devices, n_jobs=-1, dataset_size=None,
+                                            pos_pred_legend_path=None, neg_pred_legend_path=None,
+                                            resnet_type="resnet18", **kwargs):
+
+    # Creating directories
+    _create_dirs(xai_output_path)
+
+    # Loading data
+    dataset = get_dataset_transformed(db_dir, datasets_dir_path, model_dir, dataset_filename, max_size=dataset_size)
+
+    # Make prediction
+    X, y, y_pred, model = _predict(model_dir, devices[0], dataset, resnet_type=resnet_type)
+
+    # Load database
+    db = JSONDB(os.path.join(db_dir, "db.json"))
+
+    def random_2x2(X, Y):
+        x = random.randint(0, X - 2)
+        y = random.randint(0, Y - 2)
+        return [
+            (x, y),
+            (x + 1, y),
+            (x, y + 1),
+            (x + 1, y + 1),
+        ]
+
+    for sample_idx in range(len(X)):
+        db_entry = db[dataset.get_id(sample_idx)]
+        X_division, Y_division = db_entry["div"][0], db_entry["div"][1]
+        weak_explanation = gen_img(None, db_entry["cnt"], division=[X_division, Y_division],
+                                   dimension=db_entry["size"], to_highlight=random_2x2(X_division, Y_division),
+                                   draw_coordinates=True, return_image=True)
 
 
 def generate_counterfactuals_resnet_random_approach(db_dir, datasets_dir_path, dataset_filename, model_dir,
