@@ -425,13 +425,25 @@ def generate_shap_resnet(db_dir, datasets_dir_path, dataset_filename, model_dir,
         (min_shap_value, max_shap_value), shap_scale_img_path,
         yes_pred_img_path, no_pred_img_path) for i in tqdm.tqdm(range(len(X))))
 
-def generate_weak_xai_resnet_random_approach(db_dir, datasets_dir_path, dataset_filename, model_dir,
-                                             xai_output_path, yes_pred_img_path, no_pred_img_path, shapes,
-                                             colors, empty_probability, max_depth, nb_tries_per_depth,
-                                             generic_rule_fun, devices, n_jobs=-1, dataset_size=None,
-                                            pos_pred_legend_path=None, neg_pred_legend_path=None,
-                                            resnet_type="resnet18", **kwargs):
 
+def generate_weak_xai_resnet_random_approach(db_dir, datasets_dir_path, dataset_filename, model_dir,
+                                             xai_output_path, yes_pred_img_path, no_pred_img_path, devices,
+                                             dataset_size=None, resnet_type="resnet18", **kwargs):
+    """
+    Generating a weak explanation which highlights a random square of 2x2 symbols in the image
+    :param db_dir: root of the database.
+    :param datasets_dir_path: path to the directory where the datasets are located.
+    :param dataset_filename: filename of the dataset.
+    :param model_dir: path of the model directory.
+    :param xai_output_path: path where to save the results.
+    :param yes_pred_img_path: path to the image that represents the yes prediction.
+    :param no_pred_img_path: path to the image that represents the no prediction.
+    :param devices: device to use for pytorch computation.
+    :param dataset_size: elements of the dataset are loaded until the size reaches this value. If None, the whole dataset is loaded.
+    :param resnet_type: type of resnet model to use (either "resnet18" or "resnet50").
+    :param kwargs:
+    :return:
+    """
     # Creating directories
     _create_dirs(xai_output_path)
 
@@ -460,6 +472,17 @@ def generate_weak_xai_resnet_random_approach(db_dir, datasets_dir_path, dataset_
         weak_explanation = gen_img(None, db_entry["cnt"], division=[X_division, Y_division],
                                    dimension=db_entry["size"], to_highlight=random_2x2(X_division, Y_division),
                                    draw_coordinates=True, return_image=True)
+
+        output_img_path = os.path.join(xai_output_path, str(sample_idx) + ".png")
+
+        _generate_displayable_explanation(y_pred, weak_explanation, yes_pred_img_path, no_pred_img_path, output_img_path,
+                                          output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5)
+
+        output_img_AIonly_path = os.path.join(xai_output_path, str(sample_idx) + "AIonly.png")
+        _generate_displayable_explanation(y_pred, None, yes_pred_img_path, no_pred_img_path,
+                                          output_img_AIonly_path,
+                                          output_size=(600, 400), left_ratio=0.35, font_size=20, padding=5,
+                                          AI_only=True)
 
 
 def generate_counterfactuals_resnet_random_approach(db_dir, datasets_dir_path, dataset_filename, model_dir,
