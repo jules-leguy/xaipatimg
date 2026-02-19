@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task Order Effects — Statistical Report</title>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=JetBrains+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #FAF9F6;
+  --surface: #FFFFFF;
+  --border: #E2DFD9;
+  --border-dark: #C4BFB5;
+  --text: #2C2A26;
+  --text-muted: #7A756B;
+  --accent: #2E86AB;
+  --sig3: #1B6B3A;
+  --sig2: #2E86AB;
+  --sig1: #C26A2F;
+  --marginal: #9B7F30;
+  --ns: #A09B91;
+  --danger: #C23B2F;
+  --row-alt: #F6F4F0;
+  --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; padding: 2rem; max-width: 1300px; margin: 0 auto; }
+h1 { font-family: 'Source Serif 4', serif; font-size: 2rem; font-weight: 700; margin-bottom: 0.3rem; letter-spacing: -0.02em; }
+h2 { font-family: 'Source Serif 4', serif; font-size: 1.4rem; font-weight: 600; margin: 2.5rem 0 0.8rem; padding-bottom: 0.4rem; border-bottom: 2px solid var(--border); letter-spacing: -0.01em; }
+h3 { font-size: 1.05rem; font-weight: 600; margin: 1.5rem 0 0.5rem; color: var(--text); }
+p, li { font-size: 0.92rem; color: var(--text); }
+.subtitle { color: var(--text-muted); font-size: 0.95rem; margin-bottom: 2rem; }
+.sample-info { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin: 1rem 0 2rem; }
+.sample-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.2rem; box-shadow: var(--shadow); }
+.sample-card .label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-weight: 500; }
+.sample-card .value { font-family: 'JetBrains Mono', monospace; font-size: 1.5rem; font-weight: 500; margin-top: 0.2rem; }
+.legend { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.2rem; margin-bottom: 1.5rem; font-size: 0.82rem; box-shadow: var(--shadow); }
+.legend code { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; background: var(--row-alt); padding: 0.1em 0.35em; border-radius: 3px; }
+.legend .sig-demo { display: inline-flex; gap: 1rem; margin-top: 0.4rem; flex-wrap: wrap; }
+.legend .sig-demo span { display: inline-flex; align-items: center; gap: 0.25rem; }
+.sig-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.sig-dot.s3 { background: var(--sig3); }
+.sig-dot.s2 { background: var(--sig2); }
+.sig-dot.s1 { background: var(--sig1); }
+.sig-dot.mg { background: var(--marginal); }
+.sig-dot.ns { background: var(--ns); }
+table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin: 0.5rem 0 1.5rem; background: var(--surface); border-radius: 8px; overflow: hidden; box-shadow: var(--shadow); border: 1px solid var(--border); }
+thead th { background: #EDEBE6; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); padding: 0.65rem 0.6rem; text-align: left; border-bottom: 2px solid var(--border-dark); white-space: nowrap; }
+tbody td { padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; white-space: nowrap; }
+tbody tr:nth-child(even) { background: var(--row-alt); }
+tbody tr:hover { background: #EDE9DF; }
+td.dv-label { font-family: 'DM Sans', sans-serif; font-weight: 500; font-size: 0.82rem; }
+td.sig-cell { font-weight: 600; }
+td.sig-cell.s3 { color: var(--sig3); }
+td.sig-cell.s2 { color: var(--sig2); }
+td.sig-cell.s1 { color: var(--sig1); }
+td.sig-cell.mg { color: var(--marginal); }
+td.sig-cell.ns { color: var(--ns); }
+.cond-header { background: #E5E2DB !important; }
+.cond-header td { font-family: 'DM Sans', sans-serif; font-weight: 600; font-size: 0.88rem; padding: 0.6rem; border-bottom: 2px solid var(--border-dark); color: var(--text); }
+.target-header { background: #DCD8CF !important; }
+.target-header td { font-family: 'Source Serif 4', serif; font-weight: 600; font-size: 0.92rem; padding: 0.55rem 0.6rem; color: var(--accent); letter-spacing: -0.01em; }
+.method-note { background: var(--surface); border-left: 3px solid var(--accent); padding: 0.8rem 1rem; margin: 1rem 0; font-size: 0.85rem; border-radius: 0 6px 6px 0; }
+.method-note strong { color: var(--accent); }
+.summary-box { background: linear-gradient(135deg, #F0F7FA, #FAF9F6); border: 1px solid #C8DDE6; border-radius: 8px; padding: 1.2rem; margin: 1rem 0; }
+.summary-box h4 { font-family: 'Source Serif 4', serif; font-size: 1rem; margin-bottom: 0.5rem; color: var(--accent); }
+.summary-box ul { padding-left: 1.2rem; }
+.summary-box li { font-size: 0.88rem; margin-bottom: 0.3rem; }
+.footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); font-size: 0.8rem; color: var(--text-muted); }
+@media (max-width: 900px) { body { padding: 1rem; } table { font-size: 0.75rem; } }
+</style>
+</head>
+<body>
+
+<h1>Task Order Effects — Statistical Report</h1>
+<p class="subtitle">Analysis of task ordering effects on human-AI decision-making outcomes.<br>
+Conditions: H (human alone) and H+AI (human + AI, no XAI). Targets: Low/Low and High/Strong.</p>
+
+<div class="sample-info">
+  <div class="sample-card"><div class="label">Total Participants</div><div class="value">505</div></div>
+  <div class="sample-card"><div class="label">H + H+AI subset</div><div class="value">172</div></div>
+  <div class="sample-card"><div class="label">H condition</div><div class="value">85</div></div>
+  <div class="sample-card"><div class="label">H+AI condition</div><div class="value">87</div></div>
+</div>
+
+<h3>Starting task distribution</h3>
+<table style="max-width:500px">
+<thead><tr><th>Started with</th><th>H</th><th>H+AI</th><th>Total</th></tr></thead>
+<tbody>
+<tr><td class="dv-label">Low / Low</td><td>29</td><td>20</td><td>49</td></tr>
+<tr><td class="dv-label">Low / Strong</td><td>21</td><td>26</td><td>47</td></tr>
+<tr><td class="dv-label">High / Low</td><td>19</td><td>23</td><td>42</td></tr>
+<tr><td class="dv-label">High / Strong</td><td>16</td><td>18</td><td>34</td></tr>
+</tbody>
+</table>
+
+<div class="legend">
+  <strong>Significance convention</strong><br>
+  <div class="sig-demo">
+    <span><span class="sig-dot s3"></span> <code>***</code> p &lt; .001</span>
+    <span><span class="sig-dot s2"></span> <code>**</code> p &lt; .01</span>
+    <span><span class="sig-dot s1"></span> <code>*</code> p &lt; .05</span>
+    <span><span class="sig-dot mg"></span> <code>†</code> p &lt; .10</span>
+    <span><span class="sig-dot ns"></span> <code>ns</code> p ≥ .10</span>
+  </div>
+  <br>
+  <strong>Nomenclature:</strong> Task conditions are labelled Difficulty / Time Pressure.<br>
+  Low / Low = Low difficulty, Low time pressure (easy task, 25s limit).<br>
+  High / Strong = High difficulty, Strong time pressure (hard task, 10s limit).
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<h2>1. Omnibus Tests — Kruskal-Wallis H</h2>
+
+<div class="method-note">
+  <strong>Method:</strong> Kruskal-Wallis H test comparing 4 groups (one per starting task) on each dependent variable.
+  Effect size: η² = (H − k + 1) / (N − k). Non-parametric omnibus test appropriate for unequal group sizes and non-normal distributions.
+</div>
+
+<table>
+<thead><tr><th>Condition</th><th>Target</th><th>Dependent Variable</th><th>H</th><th>p</th><th>Sig.</th><th>η²</th></tr></thead>
+<tbody>
+<tr class="cond-header"><td colspan="7">H (n = 85)</td></tr>
+<tr class="target-header"><td colspan="7">Target: Low / Low</td></tr>
+<tr><td></td><td></td><td class="dv-label">Accuracy</td><td>0.943</td><td>.815</td><td class="sig-cell ns">ns</td><td>−.025</td></tr>
+<tr><td></td><td></td><td class="dv-label">Reliance</td><td>1.150</td><td>.765</td><td class="sig-cell ns">ns</td><td>−.023</td></tr>
+<tr><td></td><td></td><td class="dv-label">Over-reliance</td><td>0.420</td><td>.936</td><td class="sig-cell ns">ns</td><td>−.032</td></tr>
+<tr><td></td><td></td><td class="dv-label">Under-reliance</td><td>1.059</td><td>.787</td><td class="sig-cell ns">ns</td><td>−.024</td></tr>
+<tr><td></td><td></td><td class="dv-label">Trust</td><td colspan="4" style="color:var(--text-muted); font-family:'DM Sans'">— not measured (no AI) —</td></tr>
+<tr><td></td><td></td><td class="dv-label">Cognitive Load</td><td>4.389</td><td>.222</td><td class="sig-cell ns">ns</td><td>.017</td></tr>
+<tr class="target-header"><td colspan="7">Target: High / Strong</td></tr>
+<tr><td></td><td></td><td class="dv-label">Accuracy</td><td>0.387</td><td>.943</td><td class="sig-cell ns">ns</td><td>−.032</td></tr>
+<tr><td></td><td></td><td class="dv-label">Reliance</td><td>0.737</td><td>.864</td><td class="sig-cell ns">ns</td><td>−.028</td></tr>
+<tr><td></td><td></td><td class="dv-label">Over-reliance</td><td>3.522</td><td>.318</td><td class="sig-cell ns">ns</td><td>.006</td></tr>
+<tr><td></td><td></td><td class="dv-label">Under-reliance</td><td>0.344</td><td>.952</td><td class="sig-cell ns">ns</td><td>−.033</td></tr>
+<tr><td></td><td></td><td class="dv-label">Trust</td><td colspan="4" style="color:var(--text-muted); font-family:'DM Sans'">— not measured (no AI) —</td></tr>
+<tr><td></td><td></td><td class="dv-label">Cognitive Load</td><td>1.449</td><td>.694</td><td class="sig-cell ns">ns</td><td>−.019</td></tr>
+
+<tr class="cond-header"><td colspan="7">H+AI (n = 87)</td></tr>
+<tr class="target-header"><td colspan="7">Target: Low / Low</td></tr>
+<tr><td></td><td></td><td class="dv-label">Accuracy</td><td>1.942</td><td>.585</td><td class="sig-cell ns">ns</td><td>−.013</td></tr>
+<tr><td></td><td></td><td class="dv-label">Reliance</td><td>2.499</td><td>.475</td><td class="sig-cell ns">ns</td><td>−.006</td></tr>
+<tr><td></td><td></td><td class="dv-label">Over-reliance</td><td>2.652</td><td>.448</td><td class="sig-cell ns">ns</td><td>−.004</td></tr>
+<tr><td></td><td></td><td class="dv-label">Under-reliance</td><td>1.842</td><td>.606</td><td class="sig-cell ns">ns</td><td>−.014</td></tr>
+<tr><td></td><td></td><td class="dv-label">Trust</td><td>7.801</td><td>.050</td><td class="sig-cell mg">†</td><td>.058</td></tr>
+<tr><td></td><td></td><td class="dv-label">Cognitive Load</td><td>7.353</td><td>.062</td><td class="sig-cell mg">†</td><td>.052</td></tr>
+<tr class="target-header"><td colspan="7">Target: High / Strong</td></tr>
+<tr><td></td><td></td><td class="dv-label">Accuracy</td><td>5.239</td><td>.155</td><td class="sig-cell ns">ns</td><td>.027</td></tr>
+<tr><td></td><td></td><td class="dv-label">Reliance</td><td>12.769</td><td>.005</td><td class="sig-cell s2">**</td><td>.118</td></tr>
+<tr><td></td><td></td><td class="dv-label">Over-reliance</td><td>15.038</td><td>.002</td><td class="sig-cell s2">**</td><td>.145</td></tr>
+<tr><td></td><td></td><td class="dv-label">Under-reliance</td><td>9.423</td><td>.024</td><td class="sig-cell s1">*</td><td>.077</td></tr>
+<tr><td></td><td></td><td class="dv-label">Trust</td><td>2.657</td><td>.448</td><td class="sig-cell ns">ns</td><td>−.004</td></tr>
+<tr><td></td><td></td><td class="dv-label">Cognitive Load</td><td>8.228</td><td>.042</td><td class="sig-cell s1">*</td><td>.063</td></tr>
+</tbody>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<h2>2. Pairwise Comparisons — Target First vs Each Other Starting Task</h2>
+
+<div class="method-note">
+  <strong>Method:</strong> Mann-Whitney U test (two-sided) with permutation test (10,000 iterations) for robustness.
+  Effect size: Cohen's d (pooled SD). Comparisons are: group who did the target task first vs group who started with a different task.
+  Positive d = higher value when the target was done first.
+</div>
+
+<h3>H condition — Target: Low / Low</h3>
+<table>
+<thead><tr><th>DV</th><th>Target-first M (n=29)</th><th>vs Started</th><th>Other M (n)</th><th>d</th><th>U</th><th>p<sub>MW</sub></th><th>p<sub>perm</sub></th><th>Sig.</th></tr></thead>
+<tbody>
+<tr><td class="dv-label">Accuracy</td><td>0.874</td><td>Low / Strong</td><td>0.849 (21)</td><td>+0.22</td><td>324.5</td><td>.690</td><td>.433</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Accuracy</td><td>0.874</td><td>High / Low</td><td>0.890 (19)</td><td>−0.17</td><td>248.5</td><td>.560</td><td>.614</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Accuracy</td><td>0.874</td><td>High / Strong</td><td>0.844 (16)</td><td>+0.25</td><td>245.0</td><td>.757</td><td>.424</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Reliance</td><td>0.744</td><td>Low / Strong</td><td>0.722 (21)</td><td>+0.22</td><td>313.0</td><td>.869</td><td>.475</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Reliance</td><td>0.744</td><td>High / Low</td><td>0.750 (19)</td><td>−0.07</td><td>263.5</td><td>.577</td><td>.855</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Reliance</td><td>0.744</td><td>High / Strong</td><td>0.708 (16)</td><td>+0.39</td><td>252.0</td><td>.475</td><td>.264</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Over-reliance</td><td>0.103</td><td>Low / Strong</td><td>0.119 (21)</td><td>−0.07</td><td>296.5</td><td>.805</td><td>1.000</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Over-reliance</td><td>0.103</td><td>High / Low</td><td>0.079 (19)</td><td>+0.12</td><td>288.0</td><td>.685</td><td>.729</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Over-reliance</td><td>0.103</td><td>High / Strong</td><td>0.094 (16)</td><td>+0.05</td><td>234.0</td><td>.891</td><td>1.000</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Under-reliance</td><td>0.128</td><td>Low / Strong</td><td>0.157 (21)</td><td>−0.25</td><td>296.0</td><td>.804</td><td>.404</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Under-reliance</td><td>0.128</td><td>High / Low</td><td>0.116 (19)</td><td>+0.12</td><td>294.0</td><td>.528</td><td>.721</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Under-reliance</td><td>0.128</td><td>High / Strong</td><td>0.169 (16)</td><td>−0.35</td><td>210.0</td><td>.627</td><td>.300</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Cognitive Load</td><td>18.52</td><td>Low / Strong</td><td>17.57 (21)</td><td>+0.17</td><td>332.0</td><td>.370</td><td>.553</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Cognitive Load</td><td>18.52</td><td>High / Low</td><td>15.37 (19)</td><td>+0.60</td><td>348.0</td><td>.053</td><td>.054</td><td class="sig-cell mg">†</td></tr>
+<tr><td class="dv-label">Cognitive Load</td><td>18.52</td><td>High / Strong</td><td>17.19 (16)</td><td>+0.27</td><td>251.5</td><td>.348</td><td>.401</td><td class="sig-cell ns">ns</td></tr>
+</tbody>
+</table>
+
+<h3>H condition — Target: High / Strong</h3>
+<table>
+<thead><tr><th>DV</th><th>Target-first M (n=16)</th><th>vs Started</th><th>Other M (n)</th><th>d</th><th>U</th><th>p<sub>MW</sub></th><th>p<sub>perm</sub></th><th>Sig.</th></tr></thead>
+<tbody>
+<tr><td class="dv-label">Accuracy</td><td>0.510</td><td>Low / Low</td><td>0.526 (29)</td><td>−0.12</td><td>234.0</td><td>.981</td><td>.722</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Accuracy</td><td>0.510</td><td>Low / Strong</td><td>0.548 (21)</td><td>−0.22</td><td>152.0</td><td>.586</td><td>.483</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Accuracy</td><td>0.510</td><td>High / Low</td><td>0.522 (19)</td><td>−0.08</td><td>146.0</td><td>.800</td><td>.794</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Reliance</td><td>0.510</td><td>Low / Low</td><td>0.540 (29)</td><td>−0.27</td><td>200.0</td><td>.358</td><td>.406</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Reliance</td><td>0.510</td><td>Low / Strong</td><td>0.520 (21)</td><td>−0.07</td><td>159.0</td><td>.742</td><td>.794</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Reliance</td><td>0.510</td><td>High / Low</td><td>0.522 (19)</td><td>−0.07</td><td>141.5</td><td>.684</td><td>.853</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Over-reliance</td><td>0.438</td><td>Low / Low</td><td>0.517 (29)</td><td>−0.27</td><td>207.0</td><td>.386</td><td>.432</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Over-reliance</td><td>0.438</td><td>Low / Strong</td><td>0.357 (21)</td><td>+0.22</td><td>183.5</td><td>.414</td><td>.651</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Over-reliance</td><td>0.438</td><td>High / Low</td><td>0.421 (19)</td><td>+0.05</td><td>154.5</td><td>.892</td><td>1.000</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Under-reliance</td><td>0.475</td><td>Low / Low</td><td>0.455 (29)</td><td>+0.17</td><td>245.0</td><td>.647</td><td>.585</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Under-reliance</td><td>0.475</td><td>Low / Strong</td><td>0.448 (21)</td><td>+0.18</td><td>178.0</td><td>.603</td><td>.632</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Under-reliance</td><td>0.475</td><td>High / Low</td><td>0.458 (19)</td><td>+0.11</td><td>159.0</td><td>.673</td><td>.773</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Cognitive Load</td><td>27.19</td><td>Low / Low</td><td>27.38 (29)</td><td>−0.03</td><td>204.0</td><td>.306</td><td>.943</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Cognitive Load</td><td>27.19</td><td>Low / Strong</td><td>28.43 (21)</td><td>−0.32</td><td>147.0</td><td>.421</td><td>.358</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Cognitive Load</td><td>27.19</td><td>High / Low</td><td>26.32 (19)</td><td>+0.16</td><td>152.0</td><td>.987</td><td>.642</td><td class="sig-cell ns">ns</td></tr>
+</tbody>
+</table>
+
+<h3>H+AI condition — Target: Low / Low</h3>
+<table>
+<thead><tr><th>DV</th><th>Target-first M (n=20)</th><th>vs Started</th><th>Other M (n)</th><th>d</th><th>U</th><th>p<sub>MW</sub></th><th>p<sub>perm</sub></th><th>Sig.</th></tr></thead>
+<tbody>
+<tr><td class="dv-label">Accuracy</td><td>0.883</td><td>Low / Strong</td><td>0.888 (26)</td><td>−0.05</td><td>242.0</td><td>.517</td><td>.860</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Accuracy</td><td>0.883</td><td>High / Low</td><td>0.906 (23)</td><td>−0.19</td><td>215.0</td><td>.657</td><td>.547</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Accuracy</td><td>0.883</td><td>High / Strong</td><td>0.870 (18)</td><td>+0.11</td><td>162.5</td><td>.478</td><td>.828</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Reliance</td><td>0.783</td><td>Low / Strong</td><td>0.830 (26)</td><td>−0.46</td><td>205.5</td><td>.151</td><td>.150</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Reliance</td><td>0.783</td><td>High / Low</td><td>0.822 (23)</td><td>−0.38</td><td>186.5</td><td>.204</td><td>.198</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Reliance</td><td>0.783</td><td>High / Strong</td><td>0.815 (18)</td><td>−0.32</td><td>157.0</td><td>.335</td><td>.335</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Over-reliance</td><td>0.200</td><td>Low / Strong</td><td>0.327 (26)</td><td>−0.35</td><td>216.0</td><td>.203</td><td>.304</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Over-reliance</td><td>0.200</td><td>High / Low</td><td>0.239 (23)</td><td>−0.11</td><td>226.5</td><td>.868</td><td>.835</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Over-reliance</td><td>0.200</td><td>High / Strong</td><td>0.333 (18)</td><td>−0.37</td><td>154.0</td><td>.233</td><td>.281</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Under-reliance</td><td>0.100</td><td>Low / Strong</td><td>0.069 (26)</td><td>+0.32</td><td>278.5</td><td>.497</td><td>.372</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Under-reliance</td><td>0.100</td><td>High / Low</td><td>0.061 (23)</td><td>+0.37</td><td>264.0</td><td>.222</td><td>.246</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Under-reliance</td><td>0.100</td><td>High / Strong</td><td>0.089 (18)</td><td>+0.10</td><td>186.0</td><td>.840</td><td>.766</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label" style="font-weight:700">Trust</td><td>2.150</td><td>Low / Strong</td><td>3.308 (26)</td><td>−0.76</td><td>151.5</td><td>.021</td><td>.014</td><td class="sig-cell s1">*</td></tr>
+<tr><td class="dv-label" style="font-weight:700">Trust</td><td>2.150</td><td>High / Low</td><td>3.043 (23)</td><td>−0.55</td><td>168.5</td><td>.110</td><td>.090</td><td class="sig-cell mg">†</td></tr>
+<tr><td class="dv-label" style="font-weight:700">Trust</td><td>2.150</td><td>High / Strong</td><td>3.444 (18)</td><td>−0.94</td><td>91.0</td><td>.007</td><td>.008</td><td class="sig-cell s2">**</td></tr>
+<tr><td class="dv-label">Cognitive Load</td><td>17.55</td><td>Low / Strong</td><td>17.04 (26)</td><td>+0.08</td><td>265.5</td><td>.747</td><td>.787</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Cognitive Load</td><td>17.55</td><td>High / Low</td><td>13.61 (23)</td><td>+0.70</td><td>313.0</td><td>.029</td><td>.033</td><td class="sig-cell s1">*</td></tr>
+<tr><td class="dv-label">Cognitive Load</td><td>17.55</td><td>High / Strong</td><td>18.44 (18)</td><td>−0.13</td><td>169.0</td><td>.619</td><td>.714</td><td class="sig-cell ns">ns</td></tr>
+</tbody>
+</table>
+
+<h3>H+AI condition — Target: High / Strong</h3>
+<table>
+<thead><tr><th>DV</th><th>Target-first M (n=18)</th><th>vs Started</th><th>Other M (n)</th><th>d</th><th>U</th><th>p<sub>MW</sub></th><th>p<sub>perm</sub></th><th>Sig.</th></tr></thead>
+<tbody>
+<tr><td class="dv-label">Accuracy</td><td>0.792</td><td>Low / Low</td><td>0.738 (20)</td><td>+0.43</td><td>216.0</td><td>.158</td><td>.182</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Accuracy</td><td>0.792</td><td>Low / Strong</td><td>0.788 (26)</td><td>+0.03</td><td>245.0</td><td>.562</td><td>.954</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Accuracy</td><td>0.792</td><td>High / Low</td><td>0.732 (23)</td><td>+0.51</td><td>264.0</td><td>.077</td><td>.112</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label" style="font-weight:700">Reliance</td><td>0.912</td><td>Low / Low</td><td>0.800 (20)</td><td>+0.69</td><td>232.5</td><td>.053</td><td>.038</td><td class="sig-cell s1">*</td></tr>
+<tr><td class="dv-label">Reliance</td><td>0.912</td><td>Low / Strong</td><td>0.952 (26)</td><td>−0.36</td><td>208.0</td><td>.291</td><td>.260</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Reliance</td><td>0.912</td><td>High / Low</td><td>0.826 (23)</td><td>+0.51</td><td>253.5</td><td>.126</td><td>.117</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Over-reliance</td><td>0.833</td><td>Low / Low</td><td>0.625 (20)</td><td>+0.56</td><td>222.0</td><td>.063</td><td>.136</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Over-reliance</td><td>0.833</td><td>Low / Strong</td><td>0.981 (26)</td><td>−0.64</td><td>181.0</td><td>.059</td><td>.053</td><td class="sig-cell mg">†</td></tr>
+<tr><td class="dv-label">Over-reliance</td><td>0.833</td><td>High / Low</td><td>0.783 (23)</td><td>+0.14</td><td>217.5</td><td>.600</td><td>.660</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Under-reliance</td><td>0.072</td><td>Low / Low</td><td>0.165 (20)</td><td>−0.59</td><td>137.5</td><td>.081</td><td>.080</td><td class="sig-cell mg">†</td></tr>
+<tr><td class="dv-label">Under-reliance</td><td>0.072</td><td>Low / Strong</td><td>0.054 (26)</td><td>+0.17</td><td>240.5</td><td>.794</td><td>.629</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Under-reliance</td><td>0.072</td><td>High / Low</td><td>0.165 (23)</td><td>−0.58</td><td>162.0</td><td>.066</td><td>.080</td><td class="sig-cell mg">†</td></tr>
+<tr><td class="dv-label">Trust</td><td>4.111</td><td>Low / Low</td><td>3.600 (20)</td><td>+0.39</td><td>220.5</td><td>.116</td><td>.271</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Trust</td><td>4.111</td><td>Low / Strong</td><td>4.115 (26)</td><td>−0.00</td><td>230.0</td><td>.823</td><td>1.000</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Trust</td><td>4.111</td><td>High / Low</td><td>3.696 (23)</td><td>+0.27</td><td>229.5</td><td>.519</td><td>.420</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label" style="font-weight:700">Cognitive Load</td><td>24.78</td><td>Low / Low</td><td>25.55 (20)</td><td>−0.15</td><td>171.0</td><td>.528</td><td>.661</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label">Cognitive Load</td><td>24.78</td><td>Low / Strong</td><td>22.04 (26)</td><td>+0.45</td><td>277.0</td><td>.227</td><td>.158</td><td class="sig-cell ns">ns</td></tr>
+<tr><td class="dv-label" style="font-weight:700">Cognitive Load</td><td>24.78</td><td>High / Low</td><td>19.17 (23)</td><td>+0.81</td><td>278.5</td><td>.044</td><td>.014</td><td class="sig-cell s1">*</td></tr>
+</tbody>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<h2>3. Binary Comparison — Target First vs Not First</h2>
+
+<div class="method-note">
+  <strong>Method:</strong> Same as above (Mann-Whitney U + permutation test), but collapsing all non-target starting groups into a single "later" group.
+</div>
+
+<table>
+<thead><tr><th>Condition</th><th>Target</th><th>DV</th><th>First M (n)</th><th>Later M (n)</th><th>d</th><th>p<sub>MW</sub></th><th>p<sub>perm</sub></th><th>Sig.</th></tr></thead>
+<tbody>
+<tr class="cond-header"><td colspan="9">H (n = 85)</td></tr>
+<tr><td></td><td>Low / Low</td><td class="dv-label">Accuracy</td><td>0.874 (29)</td><td>0.862 (56)</td><td>+0.10</td><td>.958</td><td>.662</td><td class="sig-cell ns">ns</td></tr>
+<tr><td></td><td>Low / Low</td><td class="dv-label">Reliance</td><td>0.744 (29)</td><td>0.728 (56)</td><td>+0.16</td><td>.912</td><td>.510</td><td class="sig-cell ns">ns</td></tr>
+<tr><td></td><td>Low / Low</td><td class="dv-label">Over-reliance</td><td>0.103 (29)</td><td>0.098 (56)</td><td>+0.03</td><td>.915</td><td>1.000</td><td class="sig-cell ns">ns</td></tr>
+<tr><td></td><td>Low / Low</td><td class="dv-label">Under-reliance</td><td>0.128 (29)</td><td>0.146 (56)</td><td>−0.15</td><td>.977</td><td>.514</td><td class="sig-cell ns">ns</td></tr>
+<tr><td></td><td>Low / Low</td><td class="dv-label">Cognitive Load</td><td>18.52 (29)</td><td>16.71 (56)</td><td>+0.34</td><td>.099</td><td>.143</td><td class="sig-cell ns">ns</td></tr>
+<tr><td></td><td>High / Strong</td><td class="dv-label">Accuracy</td><td>0.510 (16)</td><td>0.531 (69)</td><td>−0.15</td><td>.757</td><td>.581</td><td class="sig-cell ns">ns</td></tr>
+<tr><td></td><td>High / Strong</td><td class="dv-label">Reliance</td><td>0.510 (16)</td><td>0.529 (69)</td><td>−0.13</td><td>.482</td><td>.652</td><td class="sig-cell ns">ns</td></tr>
+<tr><td></td><td>High / Strong</td><td class="dv-label">Over-reliance</td><td>0.438 (16)</td><td>0.442 (69)</td><td>−0.01</td><td>.985</td><td>1.000</td><td class="sig-cell ns">ns</td></tr>
+<tr><td></td><td>High / Strong</td><td class="dv-label">Under-reliance</td><td>0.475 (16)</td><td>0.454 (69)</td><td>+0.15</td><td>.575</td><td>.592</td><td class="sig-cell ns">ns</td></tr>
+<tr><td></td><td>High / Strong</td><td class="dv-label">Cognitive Load</td><td>27.19 (16)</td><td>27.41 (69)</td><td>−0.04</td><td>.440</td><td>.903</td><td class="sig-cell ns">ns</td></tr>
+
+<tr class="cond-header"><td colspan="9">H+AI (n = 87)</td></tr>
+<tr><td></td><td>Low / Low</td><td class="dv-label">Accuracy</td><td>0.883 (20)</td><td>0.889 (67)</td><td>−0.06</td><td>.725</td><td>.769</td><td class="sig-cell ns">ns</td></tr>
+<tr><td></td><td>Low / Low</td><td class="dv-label">Reliance</td><td>0.783 (20)</td><td>0.823 (67)</td><td>−0.39</td><td>.129</td><td>.141</td><td class="sig-cell ns">ns</td></tr>
+<tr><td></td><td>Low / Low</td><td class="dv-label">Over-reliance</td><td>0.200 (20)</td><td>0.299 (67)</td><td>−0.27</td><td>.287</td><td>.317</td><td class="sig-cell ns">ns</td></tr>
+<tr><td></td><td>Low / Low</td><td class="dv-label">Under-reliance</td><td>0.100 (20)</td><td>0.072 (67)</td><td>+0.30</td><td>.370</td><td>.287</td><td class="sig-cell ns">ns</td></tr>
+<tr><td></td><td style="font-weight:700">Low / Low</td><td class="dv-label" style="font-weight:700">Trust</td><td>2.150 (20)</td><td>3.254 (67)</td><td>−0.71</td><td>.008</td><td>.007</td><td class="sig-cell s2">**</td></tr>
+<tr><td></td><td>Low / Low</td><td class="dv-label">Cognitive Load</td><td>17.55 (20)</td><td>16.24 (67)</td><td>+0.20</td><td>.379</td><td>.453</td><td class="sig-cell ns">ns</td></tr>
+<tr><td></td><td>High / Strong</td><td class="dv-label">Accuracy</td><td>0.792 (18)</td><td>0.755 (69)</td><td>+0.32</td><td>.139</td><td>.249</td><td class="sig-cell ns">ns</td></tr>
+<tr><td></td><td>High / Strong</td><td class="dv-label">Reliance</td><td>0.912 (18)</td><td>0.866 (69)</td><td>+0.28</td><td>.366</td><td>.298</td><td class="sig-cell ns">ns</td></tr>
+<tr><td></td><td>High / Strong</td><td class="dv-label">Over-reliance</td><td>0.833 (18)</td><td>0.812 (69)</td><td>+0.07</td><td>.709</td><td>.852</td><td class="sig-cell ns">ns</td></tr>
+<tr><td></td><td>High / Strong</td><td class="dv-label">Under-reliance</td><td>0.072 (18)</td><td>0.123 (69)</td><td>−0.33</td><td>.204</td><td>.232</td><td class="sig-cell ns">ns</td></tr>
+<tr><td></td><td>High / Strong</td><td class="dv-label">Trust</td><td>4.111 (18)</td><td>3.826 (69)</td><td>+0.20</td><td>.357</td><td>.463</td><td class="sig-cell ns">ns</td></tr>
+<tr><td></td><td>High / Strong</td><td class="dv-label">Cognitive Load</td><td>24.78 (18)</td><td>22.10 (69)</td><td>+0.38</td><td>.268</td><td>.161</td><td class="sig-cell ns">ns</td></tr>
+</tbody>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<h2>4. Position Effects — Spearman Rank Correlations</h2>
+
+<div class="method-note">
+  <strong>Method:</strong> Spearman rank correlation between ordinal task position (1st–4th in the sequence) and each DV. H+AI condition only (n = 87).
+  Tests whether outcomes change monotonically with how late in the sequence a target task is encountered.
+</div>
+
+<table>
+<thead><tr><th>Target</th><th>DV</th><th>ρ</th><th>p</th><th>Sig.</th><th>n</th></tr></thead>
+<tbody>
+<tr class="target-header"><td colspan="6">Target: Low / Low</td></tr>
+<tr><td></td><td class="dv-label">Accuracy</td><td>−0.069</td><td>.528</td><td class="sig-cell ns">ns</td><td>87</td></tr>
+<tr><td></td><td class="dv-label">Reliance</td><td>+0.209</td><td>.052</td><td class="sig-cell mg">†</td><td>87</td></tr>
+<tr><td></td><td class="dv-label">Over-reliance</td><td>+0.168</td><td>.120</td><td class="sig-cell ns">ns</td><td>87</td></tr>
+<tr><td></td><td class="dv-label">Under-reliance</td><td>−0.122</td><td>.261</td><td class="sig-cell ns">ns</td><td>87</td></tr>
+<tr><td></td><td class="dv-label">Trust</td><td>+0.191</td><td>.077</td><td class="sig-cell mg">†</td><td>87</td></tr>
+<tr><td></td><td class="dv-label">Cognitive Load</td><td>−0.242</td><td>.024</td><td class="sig-cell s1">*</td><td>87</td></tr>
+<tr class="target-header"><td colspan="6">Target: High / Strong</td></tr>
+<tr><td></td><td class="dv-label">Accuracy</td><td>−0.152</td><td>.160</td><td class="sig-cell ns">ns</td><td>87</td></tr>
+<tr><td></td><td class="dv-label">Reliance</td><td>−0.037</td><td>.736</td><td class="sig-cell ns">ns</td><td>87</td></tr>
+<tr><td></td><td class="dv-label">Over-reliance</td><td>+0.045</td><td>.676</td><td class="sig-cell ns">ns</td><td>87</td></tr>
+<tr><td></td><td class="dv-label">Under-reliance</td><td>+0.097</td><td>.370</td><td class="sig-cell ns">ns</td><td>87</td></tr>
+<tr><td></td><td class="dv-label">Trust</td><td>−0.038</td><td>.727</td><td class="sig-cell ns">ns</td><td>87</td></tr>
+<tr><td></td><td class="dv-label">Cognitive Load</td><td>−0.004</td><td>.971</td><td class="sig-cell ns">ns</td><td>87</td></tr>
+</tbody>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<h2>5. Summary of Significant and Marginal Effects</h2>
+
+<div class="summary-box">
+<h4>H condition (no AI)</h4>
+<p>No significant effects found on any DV for either target task. The only marginal result is cognitive load on the Low/Low target when compared to High/Low starters (d = +0.60, p<sub>perm</sub> = .054). Task order has no detectable effect without AI assistance.</p>
+</div>
+
+<div class="summary-box">
+<h4>H+AI condition — Significant results</h4>
+<ul>
+  <li><strong>Trust on Low/Low target</strong> — Participants who did Low/Low first reported lower trust (M = 2.15) than those who started with any other task. Strongest contrast: vs High/Strong starters (d = −0.94, p<sub>perm</sub> = .008). Binary: d = −0.71, p<sub>perm</sub> = .007. KW omnibus marginal (p = .050).</li>
+  <li><strong>Reliance on High/Strong target</strong> — KW omnibus significant (H = 12.77, p = .005, η² = .118). Target-first group shows higher reliance than Low/Low starters (d = +0.69, p<sub>perm</sub> = .038).</li>
+  <li><strong>Over-reliance on High/Strong target</strong> — KW significant (H = 15.04, p = .002, η² = .145). Complex pattern: Low/Strong starters show very high over-reliance (M = 0.98), marginally higher than target-first group (d = −0.64, p<sub>perm</sub> = .053).</li>
+  <li><strong>Under-reliance on High/Strong target</strong> — KW significant (H = 9.42, p = .024, η² = .077). Low/Low and High/Low starters show marginally higher under-reliance (both p<sub>perm</sub> = .080).</li>
+  <li><strong>Cognitive Load on High/Strong target</strong> — KW significant (H = 8.23, p = .042). High/Low starters report lower load (d = +0.81, p<sub>perm</sub> = .014).</li>
+  <li><strong>Cognitive Load on Low/Low target</strong> — High/Low starters report lower load (d = +0.70, p<sub>perm</sub> = .033). KW omnibus marginal (p = .062).</li>
+  <li><strong>Position effect on Cognitive Load (Low/Low)</strong> — Spearman ρ = −0.24 (p = .024): cognitive load decreases monotonically with later position.</li>
+</ul>
+</div>
+
+<div class="footer">
+  <p>Generated from task order effects analysis v6. Statistical tests: Kruskal-Wallis H (omnibus), Mann-Whitney U + permutation test with 10,000 iterations (pairwise), Spearman rank correlation (position effects). Effect sizes: Cohen's d, η², ρ.</p>
+</div>
+
+</body>
+</html>

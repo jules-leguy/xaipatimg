@@ -1,0 +1,686 @@
+"""
+Task Order Effects Analysis v9 — Time Pressure Exposure
+=========================================================
+Comparison A: Task-level — "never experienced strong time pressure" (0) vs
+              "currently or previously experienced strong time pressure" (1).
+Comparison B: Participant-level — first two tasks both Low pressure vs
+              both Strong pressure (mixed excluded).
+
+Between-group: KW / Mann-Whitney + permutation.
+LMM: DV ~ exposure + task + (1|participant).
+Corrections: Holm-Bonferroni + Benjamini-Hochberg.
+"""
+import pandas as pd, numpy as np, matplotlib, ast, sys, warnings, itertools
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy import stats
+import statsmodels.formula.api as smf
+warnings.filterwarnings('ignore')
+
+DATA_PATH = sys.argv[1] if len(sys.argv) > 1 else "data.csv"
+OUTPUT_DIR = "."
+np.random.seed(42)
+
+plt.rcParams.update({
+    'font.family':'sans-serif','font.sans-serif':['DejaVu Sans'],'font.size':10,
+    'axes.titlesize':12,'axes.titleweight':'bold','axes.labelsize':10,
+    'figure.facecolor':'#FAFAFA','axes.facecolor':'#FFFFFF','axes.edgecolor':'#CCCCCC',
+    'axes.grid':True,'grid.alpha':0.25,'grid.color':'#DDDDDD'})
+
+ALL_TASKS = ['easy_mild','easy_strong','hard_mild','hard_strong']
+STRONG_TASKS = {'easy_strong','hard_strong'}
+LOW_TASKS = {'easy_mild','hard_mild'}
+DISP = {'easy_mild':'Low/Low','easy_strong':'Low/Strong',
+        'hard_mild':'High/Low','hard_strong':'High/Strong'}
+PAL_AB = {'0':'#2E86AB','1':'#E8533F'}         # blue=never, red=exposed
+PAL_B = {'Both Low':'#2E86AB','Both Strong':'#E8533F'}
+DVS = {'score':'Accuracy','reliance':'Reliance','overreliance':'Over-reliance',
+       'underreliance':'Under-reliance','trust':'Trust','cogload':'Cognitive Load'}
+CONDS = ['H','H+AI']
+
+# ── Helpers ───────────────────────────────────────────────────────────
+def parse_col(val):
+    if isinstance(val, str):
+        try: return ast.literal_eval(val)
+        except: return val
+    return val
+
+def cohens_d(g1, g2):
+    n1,n2=len(g1),len(g2)
+    if n1<2 or n2<2: return np.nan
+    p=np.sqrt(((n1-1)*np.var(g1,ddof=1)+(n2-1)*np.var(g2,ddof=1))/(n1+n2-2))
+    return (np.mean(g1)-np.mean(g2))/p if p>0 else 0.0
+
+def bootstrap_ci(data, n_boot=10000, ci=0.95):
+    rng=np.random.default_rng(42); data=np.array(data,dtype=float); data=data[~np.isnan(data)]
+    if len(data)<3: return (np.nan,np.nan)
+    boot=[np.mean(rng.choice(data,size=len(data),replace=True)) for _ in range(n_boot)]
+    a=(1-ci)/2; return (np.percentile(boot,a*100),np.percentile(boot,(1-a)*100))
+
+def permutation_test(g1, g2, n_perm=10000):
+    g1=np.array(g1,dtype=float);g1=g1[~np.isnan(g1)]
+    g2=np.array(g2,dtype=float);g2=g2[~np.isnan(g2)]
+    if len(g1)<2 or len(g2)<2: return np.nan
+    obs=abs(np.mean(g1)-np.mean(g2));comb=np.concatenate([g1,g2]);rng=np.random.default_rng(42);ct=0
+    for _ in range(n_perm):
+        rng.shuffle(comb)
+        if abs(np.mean(comb[:len(g1)])-np.mean(comb[len(g1):])) >= obs: ct+=1
+    return ct/n_perm
+
+def p_stars(p):
+    if p is None or np.isnan(p): return ''
+    if p<0.001: return '***'
+    if p<0.01: return '**'
+    if p<0.05: return '*'
+    if p<0.1: return '\u2020'
+    return 'ns'
+
+def holm_bonferroni(pvals):
+    n=len(pvals); sorted_pv=sorted(pvals,key=lambda x:x[1]); corrected={}; mx=0
+    for rank,(idx,p) in enumerate(sorted_pv):
+        adj=min(p*(n-rank),1.0); adj=max(adj,mx); mx=adj; corrected[idx]=adj
+    return corrected
+
+def benjamini_hochberg(pvals):
+    n=len(pvals); sorted_pv=sorted(pvals,key=lambda x:x[1],reverse=True); corrected={}; mn=1.0
+    for rank_desc,(idx,p) in enumerate(sorted_pv):
+        rank_asc=n-rank_desc; adj=min(p*n/rank_asc,1.0); adj=min(adj,mn); mn=adj; corrected[idx]=adj
+    return corrected
+
+def correct_family(rows, p_col):
+    pvals=[(i,r[p_col]) for i,r in enumerate(rows) if not np.isnan(r[p_col])]
+    if len(pvals)<2:
+        for r in rows: r['p_holm']=r.get(p_col,np.nan); r['p_bh']=r.get(p_col,np.nan)
+        return rows
+    hm=holm_bonferroni(pvals); bh=benjamini_hochberg(pvals)
+    for i,r in enumerate(rows):
+        r['p_holm']=hm.get(i,r.get(p_col,np.nan)); r['p_bh']=bh.get(i,r.get(p_col,np.nan))
+    return rows
+
+def reorder_by_quest(times_list, quest_order_list):
+    times=parse_col(times_list); order=parse_col(quest_order_list)
+    if not isinstance(times,(list,np.ndarray)) or not isinstance(order,(list,np.ndarray)): return None
+    times=list(times); order=[int(x) for x in order]
+    if len(times)!=len(order): return None
+    n=len(times); reordered=[np.nan]*n
+    for pos,qid in enumerate(order):
+        if 0<=qid<n: reordered[qid]=float(times[pos])
+    return reordered
+
+# ── Load & prepare ────────────────────────────────────────────────────
+print("="*70+"\nTASK ORDER EFFECTS v9 — TIME PRESSURE EXPOSURE\n"+"="*70)
+df = pd.read_csv(DATA_PATH)
+print(f"Total: {len(df)}")
+df = df[df['xai_condition'].isin(CONDS)].copy()
+print(f"H + H+AI: {len(df)}")
+df['tasks_order'] = df['tasks_order'].apply(parse_col)
+df['first_task'] = df['tasks_order'].apply(lambda x: x[0] if isinstance(x,list) else None)
+
+# Mean answer times per task
+for t in ALL_TASKS:
+    at_col = f"answer_times_{t}"
+    if at_col in df.columns:
+        df[f"mean_at_{t}"] = df[at_col].apply(
+            lambda v: np.nanmean(np.array(parse_col(v),dtype=float))
+            if isinstance(parse_col(v),(list,np.ndarray)) else np.nan)
+    qo_col = f"quest_order_{t}"
+    if at_col in df.columns and qo_col in df.columns:
+        df[f"at_reordered_{t}"] = df.apply(
+            lambda r, tk=t: reorder_by_quest(r[f"answer_times_{tk}"], r[f"quest_order_{tk}"]), axis=1)
+
+# ═══════════════════════════════════════════════════════════════════════
+# BUILD COMPARISON A: task-level pressure exposure
+# ═══════════════════════════════════════════════════════════════════════
+print("\n"+"="*70+"\nBUILDING COMPARISON A: PRESSURE EXPOSURE (task-level)\n"+"="*70)
+long_rows_a = []
+for _, row in df.iterrows():
+    pid = row.name
+    cond = row['xai_condition']
+    order = row['tasks_order']
+    if not isinstance(order, list) or len(order)!=4: continue
+    seen_strong = False
+    for pos, task in enumerate(order):
+        current_is_strong = task in STRONG_TASKS
+        # Exposed = current task is strong OR any prior task was strong
+        exposed = 1 if (current_is_strong or seen_strong) else 0
+        entry = {'pid':pid, 'cond':cond, 'task':task, 'task_disp':DISP[task],
+                 'position':pos+1, 'pressure_exposed':exposed}
+        for dv_base in DVS:
+            col = f"{dv_base}_{task}"
+            entry[dv_base] = row[col] if col in df.columns and pd.notna(row.get(col)) else np.nan
+        mat_col = f"mean_at_{task}"
+        entry['mean_at'] = row[mat_col] if mat_col in df.columns and pd.notna(row.get(mat_col)) else np.nan
+        long_rows_a.append(entry)
+        # Update seen_strong AFTER processing current task
+        if current_is_strong:
+            seen_strong = True
+
+df_a = pd.DataFrame(long_rows_a)
+df_a['exposure_label'] = df_a['pressure_exposed'].map({0:'Never exposed', 1:'Exposed'})
+
+print("\nPressure exposure distribution (task-level observations):")
+for cond in CONDS:
+    sub = df_a[df_a['cond']==cond]
+    print(f"\n  {cond}:")
+    ct = sub.groupby('pressure_exposed').size()
+    for k,v in ct.items(): print(f"    Exposed={k}: {v} obs")
+    # Also by position
+    print("    By position:")
+    pt = sub.groupby(['position','pressure_exposed']).size().unstack(fill_value=0)
+    print(pt.to_string())
+
+# ═══════════════════════════════════════════════════════════════════════
+# BUILD COMPARISON B: first-two-tasks pressure profile
+# ═══════════════════════════════════════════════════════════════════════
+print("\n"+"="*70+"\nBUILDING COMPARISON B: FIRST-TWO PRESSURE PROFILE\n"+"="*70)
+
+def first_two_profile(order):
+    t1, t2 = order[0], order[1]
+    p1 = 'Strong' if t1 in STRONG_TASKS else 'Low'
+    p2 = 'Strong' if t2 in STRONG_TASKS else 'Low'
+    if p1=='Low' and p2=='Low': return 'Both Low'
+    if p1=='Strong' and p2=='Strong': return 'Both Strong'
+    return 'Mixed'
+
+df['pressure_profile'] = df['tasks_order'].apply(first_two_profile)
+
+print("\nFirst-two pressure profile:")
+for cond in CONDS:
+    sub = df[df['xai_condition']==cond]
+    print(f"\n  {cond}:")
+    print(sub['pressure_profile'].value_counts().to_string())
+
+# Aggregated DVs (mean across all 4 tasks) for comparison B
+for dv_base in DVS:
+    cols = [f"{dv_base}_{t}" for t in ALL_TASKS]
+    available = [c for c in cols if c in df.columns]
+    if available: df[f"agg_{dv_base}"] = df[available].mean(axis=1)
+at_cols = [f"mean_at_{t}" for t in ALL_TASKS if f"mean_at_{t}" in df.columns]
+if at_cols: df['agg_mean_at'] = df[at_cols].mean(axis=1)
+
+# Filter to Both Low vs Both Strong only
+df_b = df[df['pressure_profile'].isin(['Both Low','Both Strong'])].copy()
+print(f"\nComparison B sample (excluding Mixed): {len(df_b)}")
+for cond in CONDS:
+    sub = df_b[df_b['xai_condition']==cond]
+    print(f"  {cond}: {len(sub)} ({sub['pressure_profile'].value_counts().to_dict()})")
+
+# Also build long-format for LMM B
+long_rows_b = []
+for _, row in df_b.iterrows():
+    pid = row.name; cond = row['xai_condition']; profile = row['pressure_profile']
+    for task in ALL_TASKS:
+        entry = {'pid':pid, 'cond':cond, 'task':task, 'task_disp':DISP[task],
+                 'pressure_profile':profile}
+        for dv_base in DVS:
+            col = f"{dv_base}_{task}"
+            entry[dv_base] = row[col] if col in df.columns and pd.notna(row.get(col)) else np.nan
+        mat_col = f"mean_at_{task}"
+        entry['mean_at'] = row[mat_col] if mat_col in df.columns and pd.notna(row.get(mat_col)) else np.nan
+        long_rows_b.append(entry)
+df_b_long = pd.DataFrame(long_rows_b)
+
+# ═══════════════════════════════════════════════════════════════════════
+# ANALYSIS A: BETWEEN-GROUP ON TASK-LEVEL DATA
+# ═══════════════════════════════════════════════════════════════════════
+print("\n"+"="*70+"\nANALYSIS A: PRESSURE EXPOSURE — TASK-LEVEL\n"+"="*70)
+
+all_dv_keys = list(DVS.keys()) + ['mean_at']
+all_dv_labels = list(DVS.values()) + ['Mean Answer Time']
+
+# A1: Mann-Whitney on task-level observations (0 vs 1)
+mw_a_rows = []
+for cond in CONDS:
+    sub = df_a[df_a['cond']==cond]
+    print(f"\n  {cond}")
+    for dv_key, dv_label in zip(all_dv_keys, all_dv_labels):
+        if dv_key not in sub.columns: continue
+        g0 = sub[sub['pressure_exposed']==0][dv_key].dropna().values
+        g1 = sub[sub['pressure_exposed']==1][dv_key].dropna().values
+        if len(g0)<3 or len(g1)<3: continue
+        u, p_mw = stats.mannwhitneyu(g0, g1, alternative='two-sided')
+        d = cohens_d(g0, g1)
+        p_perm = permutation_test(g0, g1)
+        mw_a_rows.append({
+            'comparison':'A','cond':cond,'dv':dv_label,'dv_key':dv_key,
+            'mean_0':np.mean(g0),'n_0':len(g0),'mean_1':np.mean(g1),'n_1':len(g1),
+            'U':u,'p_mw':p_mw,'p_perm':p_perm,'d':d})
+        print(f"    {dv_label:22s}: Never={np.mean(g0):.3f}(n={len(g0)}) Exposed={np.mean(g1):.3f}(n={len(g1)}) d={d:+.3f} p_perm={p_perm:.4f} {p_stars(p_perm)}")
+
+# Correct: family = per condition
+for cond in CONDS:
+    family = [r for r in mw_a_rows if r['cond']==cond]
+    correct_family(family, 'p_perm')
+for r in mw_a_rows:
+    r.setdefault('p_holm', r.get('p_perm', np.nan))
+    r.setdefault('p_bh', r.get('p_perm', np.nan))
+
+# A2: LMM — DV ~ pressure_exposed + (1|pid) and DV ~ pressure_exposed + task + (1|pid)
+lmm_a_rows = []
+for cond in CONDS:
+    sub = df_a[df_a['cond']==cond].copy()
+    sub['pe'] = sub['pressure_exposed'].astype(str)
+    print(f"\n  LMM — {cond}")
+    for dv_key, dv_label in zip(all_dv_keys, all_dv_labels):
+        if dv_key not in sub.columns: continue
+        sub_dv = sub[['pid','pe','task',dv_key]].dropna().copy()
+        sub_dv = sub_dv.rename(columns={dv_key:'y'})
+        if len(sub_dv)<10 or sub_dv['pe'].nunique()<2: continue
+        for model_name, formula in [
+            ('Model A1 (exposure only)', 'y ~ C(pe, Treatment(reference="0"))'),
+            ('Model A2 (exposure + task)', 'y ~ C(pe, Treatment(reference="0")) + C(task)')]:
+            try:
+                md = smf.mixedlm(formula, sub_dv, groups=sub_dv['pid'])
+                mdf = md.fit(reml=True)
+                for param_name, coef in mdf.fe_params.items():
+                    if 'pe' not in param_name: continue
+                    pval = mdf.pvalues[param_name]
+                    ci = mdf.conf_int().loc[param_name]
+                    lmm_a_rows.append({
+                        'comparison':'A','cond':cond,'dv':dv_label,'dv_key':dv_key,
+                        'model':model_name,'contrast':'Exposed vs Never',
+                        'coef':coef,'se':mdf.bse[param_name],
+                        'ci_lo':ci[0],'ci_hi':ci[1],
+                        'z':mdf.tvalues[param_name],'p':pval,
+                        'n_obs':int(mdf.nobs),'n_groups':sub_dv['pid'].nunique()})
+                    print(f"    {dv_label:22s} | {model_name:28s}: β={coef:+.4f}, p={pval:.4f} {p_stars(pval)}")
+            except Exception as e:
+                print(f"    {dv_label:22s} | {model_name:28s}: FAILED — {e}")
+
+# Correct LMM A: family = per condition × model
+for cond in CONDS:
+    for model_name in ['Model A1 (exposure only)', 'Model A2 (exposure + task)']:
+        family = [r for r in lmm_a_rows if r['cond']==cond and r['model']==model_name and not np.isnan(r['p'])]
+        pvals = [(lmm_a_rows.index(r), r['p']) for r in family]
+        if len(pvals)<2: continue
+        hm=holm_bonferroni(pvals); bh=benjamini_hochberg(pvals)
+        for idx in hm: lmm_a_rows[idx]['p_holm']=hm[idx]; lmm_a_rows[idx]['p_bh']=bh[idx]
+for r in lmm_a_rows:
+    r.setdefault('p_holm', r.get('p', np.nan))
+    r.setdefault('p_bh', r.get('p', np.nan))
+
+pd.DataFrame(mw_a_rows).to_csv(f"{OUTPUT_DIR}/v9_compA_mw.csv", index=False)
+pd.DataFrame(lmm_a_rows).to_csv(f"{OUTPUT_DIR}/v9_compA_lmm.csv", index=False)
+
+# ═══════════════════════════════════════════════════════════════════════
+# ANALYSIS B: FIRST-TWO PRESSURE PROFILE
+# ═══════════════════════════════════════════════════════════════════════
+print("\n"+"="*70+"\nANALYSIS B: FIRST-TWO PRESSURE PROFILE\n"+"="*70)
+
+agg_dvs = {f"agg_{k}":v for k,v in DVS.items()}
+agg_dvs['agg_mean_at'] = 'Mean Answer Time'
+
+# B1: Mann-Whitney on aggregated participant means
+mw_b_rows = []
+for cond in CONDS:
+    sub = df_b[df_b['xai_condition']==cond]
+    print(f"\n  {cond} (n={len(sub)})")
+    for agg_col, dv_label in agg_dvs.items():
+        if agg_col not in sub.columns: continue
+        g_low = sub[sub['pressure_profile']=='Both Low'][agg_col].dropna().values
+        g_strong = sub[sub['pressure_profile']=='Both Strong'][agg_col].dropna().values
+        if len(g_low)<3 or len(g_strong)<3: continue
+        u, p_mw = stats.mannwhitneyu(g_low, g_strong, alternative='two-sided')
+        d = cohens_d(g_low, g_strong)
+        p_perm = permutation_test(g_low, g_strong)
+        mw_b_rows.append({
+            'comparison':'B','cond':cond,'dv':dv_label,'agg_col':agg_col,
+            'mean_low':np.mean(g_low),'n_low':len(g_low),
+            'mean_strong':np.mean(g_strong),'n_strong':len(g_strong),
+            'U':u,'p_mw':p_mw,'p_perm':p_perm,'d':d})
+        print(f"    {dv_label:22s}: BothLow={np.mean(g_low):.3f}(n={len(g_low)}) BothStr={np.mean(g_strong):.3f}(n={len(g_strong)}) d={d:+.3f} p_perm={p_perm:.4f} {p_stars(p_perm)}")
+
+# Correct: family = per condition
+for cond in CONDS:
+    family = [r for r in mw_b_rows if r['cond']==cond]
+    correct_family(family, 'p_perm')
+for r in mw_b_rows:
+    r.setdefault('p_holm', r.get('p_perm', np.nan))
+    r.setdefault('p_bh', r.get('p_perm', np.nan))
+
+# B2: LMM on task-level (Both Low vs Both Strong)
+lmm_b_rows = []
+for cond in CONDS:
+    sub = df_b_long[df_b_long['cond']==cond].copy()
+    if sub['pressure_profile'].nunique() < 2: continue
+    print(f"\n  LMM — {cond}")
+    for dv_key, dv_label in zip(all_dv_keys, all_dv_labels):
+        if dv_key not in sub.columns: continue
+        sub_dv = sub[['pid','pressure_profile','task',dv_key]].dropna().copy()
+        sub_dv = sub_dv.rename(columns={dv_key:'y'})
+        if len(sub_dv)<10 or sub_dv['pressure_profile'].nunique()<2: continue
+        for model_name, formula in [
+            ('Model B1 (profile only)', 'y ~ C(pressure_profile, Treatment(reference="Both Low"))'),
+            ('Model B2 (profile + task)', 'y ~ C(pressure_profile, Treatment(reference="Both Low")) + C(task)')]:
+            try:
+                md = smf.mixedlm(formula, sub_dv, groups=sub_dv['pid'])
+                mdf = md.fit(reml=True)
+                for param_name, coef in mdf.fe_params.items():
+                    if 'pressure_profile' not in param_name: continue
+                    pval = mdf.pvalues[param_name]
+                    ci = mdf.conf_int().loc[param_name]
+                    lmm_b_rows.append({
+                        'comparison':'B','cond':cond,'dv':dv_label,'dv_key':dv_key,
+                        'model':model_name,'contrast':'Both Strong vs Both Low',
+                        'coef':coef,'se':mdf.bse[param_name],
+                        'ci_lo':ci[0],'ci_hi':ci[1],
+                        'z':mdf.tvalues[param_name],'p':pval,
+                        'n_obs':int(mdf.nobs),'n_groups':sub_dv['pid'].nunique()})
+                    print(f"    {dv_label:22s} | {model_name:28s}: β={coef:+.4f}, p={pval:.4f} {p_stars(pval)}")
+            except Exception as e:
+                print(f"    {dv_label:22s} | {model_name:28s}: FAILED — {e}")
+
+# Correct LMM B: family = per condition × model
+for cond in CONDS:
+    for model_name in ['Model B1 (profile only)', 'Model B2 (profile + task)']:
+        family = [r for r in lmm_b_rows if r['cond']==cond and r['model']==model_name and not np.isnan(r['p'])]
+        pvals = [(lmm_b_rows.index(r), r['p']) for r in family]
+        if len(pvals)<2: continue
+        hm=holm_bonferroni(pvals); bh=benjamini_hochberg(pvals)
+        for idx in hm: lmm_b_rows[idx]['p_holm']=hm[idx]; lmm_b_rows[idx]['p_bh']=bh[idx]
+for r in lmm_b_rows:
+    r.setdefault('p_holm', r.get('p', np.nan))
+    r.setdefault('p_bh', r.get('p', np.nan))
+
+pd.DataFrame(mw_b_rows).to_csv(f"{OUTPUT_DIR}/v9_compB_mw.csv", index=False)
+pd.DataFrame(lmm_b_rows).to_csv(f"{OUTPUT_DIR}/v9_compB_lmm.csv", index=False)
+
+# ═══════════════════════════════════════════════════════════════════════
+# SIGNIFICANT RESULTS SUMMARY
+# ═══════════════════════════════════════════════════════════════════════
+print("\n"+"="*70+"\nSIGNIFICANT RESULTS (p_BH < .10)\n"+"="*70)
+print("\n  Comp A — MW (task-level):")
+for r in mw_a_rows:
+    if r['p_bh']<0.10: print(f"    {r['cond']:5s} | {r['dv']:22s}: d={r['d']:+.3f}, p_perm={r['p_perm']:.4f}, p_holm={r['p_holm']:.4f}, p_bh={r['p_bh']:.4f}")
+print("\n  Comp A — LMM:")
+for r in lmm_a_rows:
+    if r['p_bh']<0.10: print(f"    {r['cond']:5s} | {r['dv']:22s} | {r['model']:28s}: β={r['coef']:+.4f}, p={r['p']:.4f}, p_holm={r['p_holm']:.4f}, p_bh={r['p_bh']:.4f}")
+print("\n  Comp B — MW (aggregated):")
+for r in mw_b_rows:
+    if r['p_bh']<0.10: print(f"    {r['cond']:5s} | {r['dv']:22s}: d={r['d']:+.3f}, p_perm={r['p_perm']:.4f}, p_holm={r['p_holm']:.4f}, p_bh={r['p_bh']:.4f}")
+print("\n  Comp B — LMM:")
+for r in lmm_b_rows:
+    if r['p_bh']<0.10: print(f"    {r['cond']:5s} | {r['dv']:22s} | {r['model']:28s}: β={r['coef']:+.4f}, p={r['p']:.4f}, p_holm={r['p_holm']:.4f}, p_bh={r['p_bh']:.4f}")
+
+# ═══════════════════════════════════════════════════════════════════════
+# VISUALIZATIONS
+# ═══════════════════════════════════════════════════════════════════════
+print("\n"+"="*70+"\nGENERATING VISUALIZATIONS\n"+"="*70)
+
+# ── Fig 1: Bar charts — Comparison A (task-level, Never vs Exposed) ──
+for cond in CONDS:
+    sub = df_a[df_a['cond']==cond]
+    n_dvs = len(all_dv_keys)
+    fig, axes = plt.subplots(1, n_dvs, figsize=(2.8*n_dvs, 5))
+    fig.suptitle(f"Comparison A: Pressure Exposure (task-level) — {cond}\n"
+                 f"Never exposed vs Currently/previously exposed | 95% Bootstrap CI",
+                 fontsize=11, fontweight='bold', y=1.03)
+    for ci_idx, (dv_key, dv_label) in enumerate(zip(all_dv_keys, all_dv_labels)):
+        ax = axes[ci_idx]
+        if dv_key not in sub.columns: ax.set_visible(False); continue
+        means, clo, chi, colors, labels = [], [], [], [], []
+        for exp_val, label, color in [(0,'Never\nexposed','#2E86AB'), (1,'Exposed','#E8533F')]:
+            g = sub[sub['pressure_exposed']==exp_val][dv_key].dropna()
+            if len(g)>=2:
+                m=g.mean(); ci_v=bootstrap_ci(g.values)
+                means.append(m); clo.append(m-ci_v[0]); chi.append(ci_v[1]-m)
+            else: means.append(0); clo.append(0); chi.append(0)
+            colors.append(color); labels.append(label)
+        ax.bar(range(2), means, color=colors, alpha=0.8, width=0.55, edgecolor='white', linewidth=0.5)
+        ax.errorbar(range(2), means, yerr=[clo,chi], fmt='none', color='#333', capsize=4, linewidth=1)
+        ax.set_xticks(range(2)); ax.set_xticklabels(labels, fontsize=7)
+        ax.set_title(dv_label, fontsize=9, fontweight='bold')
+        # Add n counts
+        for xi in range(2):
+            exp_val = xi
+            n_val = len(sub[sub['pressure_exposed']==exp_val][dv_key].dropna())
+            ax.text(xi, means[xi]+chi[xi]+0.01*(ax.get_ylim()[1]-ax.get_ylim()[0]),
+                    f'n={n_val}', ha='center', fontsize=6, color='#777')
+        ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False)
+    plt.tight_layout()
+    fname = f"fig1_compA_bars_{cond.replace('+','_')}.png"
+    fig.savefig(f"{OUTPUT_DIR}/{fname}", dpi=200, bbox_inches='tight'); plt.close()
+    print(f"  -> {fname}")
+
+# ── Fig 2: Distributions — Comparison A ──────────────────────────────
+for cond in CONDS:
+    sub = df_a[df_a['cond']==cond]
+    n_dvs = len(all_dv_keys)
+    fig, axes = plt.subplots(2, n_dvs, figsize=(2.8*n_dvs, 9))
+    fig.suptitle(f"Comparison A: Distributions — {cond}\n"
+                 f"Top: violin + data | Bottom: density histograms",
+                 fontsize=11, fontweight='bold', y=1.02)
+    for ci_idx, (dv_key, dv_label) in enumerate(zip(all_dv_keys, all_dv_labels)):
+        ax_v = axes[0, ci_idx]; ax_h = axes[1, ci_idx]
+        if dv_key not in sub.columns: ax_v.set_visible(False); ax_h.set_visible(False); continue
+        groups_data, groups_colors, groups_labels = [], [], []
+        for exp_val, label, color in [(0,'Never exposed','#2E86AB'), (1,'Exposed','#E8533F')]:
+            vals = sub[sub['pressure_exposed']==exp_val][dv_key].dropna().values
+            if len(vals)>=2: groups_data.append(vals); groups_colors.append(color); groups_labels.append(label)
+        if len(groups_data)<2: ax_v.set_visible(False); ax_h.set_visible(False); continue
+        # Violin
+        positions = list(range(len(groups_data)))
+        vp = ax_v.violinplot(groups_data, positions=positions, widths=0.7,
+                             showmeans=True, showmedians=True, showextrema=False)
+        for i, pc in enumerate(vp['bodies']): pc.set_facecolor(groups_colors[i]); pc.set_alpha(0.4)
+        for pn in ['cmeans','cmedians']:
+            if pn in vp: vp[pn].set_edgecolor('#333')
+        rng = np.random.default_rng(42)
+        for i, vals in enumerate(groups_data):
+            jx = rng.normal(0, 0.06, len(vals))
+            ax_v.scatter(np.full(len(vals),i)+jx, vals,
+                         color=groups_colors[i], alpha=0.3, s=8, edgecolors='none')
+        ax_v.set_xticks(positions)
+        ax_v.set_xticklabels(groups_labels, fontsize=6)
+        ax_v.set_title(dv_label, fontsize=9, fontweight='bold')
+        ax_v.spines['top'].set_visible(False); ax_v.spines['right'].set_visible(False)
+        # Histogram
+        all_v = np.concatenate(groups_data)
+        bins = np.linspace(np.nanmin(all_v), np.nanmax(all_v), 20)
+        for i, vals in enumerate(groups_data):
+            ax_h.hist(vals, bins=bins, density=True, alpha=0.35,
+                      color=groups_colors[i], edgecolor='white', linewidth=0.3,
+                      label=groups_labels[i])
+            if len(vals)>=5:
+                try:
+                    kde = stats.gaussian_kde(vals)
+                    x_kde = np.linspace(bins[0], bins[-1], 200)
+                    ax_h.plot(x_kde, kde(x_kde), color=groups_colors[i], linewidth=1.5, alpha=0.8)
+                except: pass
+        ax_h.set_xlabel(dv_label, fontsize=7); ax_h.set_ylabel('Density', fontsize=7)
+        ax_h.spines['top'].set_visible(False); ax_h.spines['right'].set_visible(False)
+        if ci_idx==0: ax_h.legend(fontsize=5)
+    plt.tight_layout()
+    fname = f"fig2_compA_dist_{cond.replace('+','_')}.png"
+    fig.savefig(f"{OUTPUT_DIR}/{fname}", dpi=200, bbox_inches='tight'); plt.close()
+    print(f"  -> {fname}")
+
+# ── Fig 3: Bar charts — Comparison B (Both Low vs Both Strong) ───────
+for cond in CONDS:
+    sub = df_b[df_b['xai_condition']==cond]
+    if len(sub)<4: continue
+    agg_keys = list(agg_dvs.keys())
+    agg_labs = list(agg_dvs.values())
+    n_dvs = len(agg_keys)
+    fig, axes = plt.subplots(1, n_dvs, figsize=(2.8*n_dvs, 5))
+    fig.suptitle(f"Comparison B: First-Two Pressure Profile — {cond}\n"
+                 f"Both Low vs Both Strong (mixed excluded) | 95% Bootstrap CI",
+                 fontsize=11, fontweight='bold', y=1.03)
+    for ci_idx, (agg_col, label) in enumerate(zip(agg_keys, agg_labs)):
+        ax = axes[ci_idx]
+        if agg_col not in sub.columns: ax.set_visible(False); continue
+        means, clo, chi, colors, xlabels = [], [], [], [], []
+        for profile, color in [('Both Low','#2E86AB'), ('Both Strong','#E8533F')]:
+            g = sub[sub['pressure_profile']==profile][agg_col].dropna()
+            if len(g)>=2:
+                m=g.mean(); ci_v=bootstrap_ci(g.values)
+                means.append(m); clo.append(m-ci_v[0]); chi.append(ci_v[1]-m)
+            else: means.append(0); clo.append(0); chi.append(0)
+            colors.append(color); xlabels.append(profile)
+        ax.bar(range(2), means, color=colors, alpha=0.8, width=0.55, edgecolor='white', linewidth=0.5)
+        ax.errorbar(range(2), means, yerr=[clo,chi], fmt='none', color='#333', capsize=4, linewidth=1)
+        ax.set_xticks(range(2)); ax.set_xticklabels(xlabels, fontsize=7)
+        ax.set_title(label, fontsize=9, fontweight='bold')
+        for xi, profile in enumerate(['Both Low','Both Strong']):
+            n_val = len(sub[sub['pressure_profile']==profile][agg_col].dropna())
+            ax.text(xi, means[xi]+chi[xi]+0.01*(ax.get_ylim()[1]-ax.get_ylim()[0]),
+                    f'n={n_val}', ha='center', fontsize=6, color='#777')
+        ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False)
+    plt.tight_layout()
+    fname = f"fig3_compB_bars_{cond.replace('+','_')}.png"
+    fig.savefig(f"{OUTPUT_DIR}/{fname}", dpi=200, bbox_inches='tight'); plt.close()
+    print(f"  -> {fname}")
+
+# ── Fig 4: Distributions — Comparison B ──────────────────────────────
+for cond in CONDS:
+    sub = df_b[df_b['xai_condition']==cond]
+    if len(sub)<4: continue
+    agg_keys = list(agg_dvs.keys())
+    agg_labs = list(agg_dvs.values())
+    n_dvs = len(agg_keys)
+    fig, axes = plt.subplots(2, n_dvs, figsize=(2.8*n_dvs, 9))
+    fig.suptitle(f"Comparison B: Distributions — {cond}\n"
+                 f"Both Low vs Both Strong | Top: violin | Bottom: histogram",
+                 fontsize=11, fontweight='bold', y=1.02)
+    for ci_idx, (agg_col, label) in enumerate(zip(agg_keys, agg_labs)):
+        ax_v = axes[0, ci_idx]; ax_h = axes[1, ci_idx]
+        if agg_col not in sub.columns: ax_v.set_visible(False); ax_h.set_visible(False); continue
+        groups_data, groups_colors, groups_labels = [], [], []
+        for profile, color in [('Both Low','#2E86AB'), ('Both Strong','#E8533F')]:
+            vals = sub[sub['pressure_profile']==profile][agg_col].dropna().values
+            if len(vals)>=2: groups_data.append(vals); groups_colors.append(color); groups_labels.append(profile)
+        if len(groups_data)<2: ax_v.set_visible(False); ax_h.set_visible(False); continue
+        positions = list(range(len(groups_data)))
+        vp = ax_v.violinplot(groups_data, positions=positions, widths=0.7,
+                             showmeans=True, showmedians=True, showextrema=False)
+        for i, pc in enumerate(vp['bodies']): pc.set_facecolor(groups_colors[i]); pc.set_alpha(0.4)
+        for pn in ['cmeans','cmedians']:
+            if pn in vp: vp[pn].set_edgecolor('#333')
+        rng = np.random.default_rng(42)
+        for i, vals in enumerate(groups_data):
+            jx = rng.normal(0, 0.06, len(vals))
+            ax_v.scatter(np.full(len(vals),i)+jx, vals,
+                         color=groups_colors[i], alpha=0.5, s=12, edgecolors='none')
+        ax_v.set_xticks(positions); ax_v.set_xticklabels(groups_labels, fontsize=6)
+        ax_v.set_title(label, fontsize=9, fontweight='bold')
+        ax_v.spines['top'].set_visible(False); ax_v.spines['right'].set_visible(False)
+        all_v = np.concatenate(groups_data)
+        bins = np.linspace(np.nanmin(all_v), np.nanmax(all_v), 15)
+        for i, vals in enumerate(groups_data):
+            ax_h.hist(vals, bins=bins, density=True, alpha=0.35,
+                      color=groups_colors[i], edgecolor='white', linewidth=0.3,
+                      label=groups_labels[i])
+            if len(vals)>=5:
+                try:
+                    kde = stats.gaussian_kde(vals)
+                    x_kde = np.linspace(bins[0], bins[-1], 200)
+                    ax_h.plot(x_kde, kde(x_kde), color=groups_colors[i], linewidth=1.5, alpha=0.8)
+                except: pass
+        ax_h.set_xlabel(label, fontsize=7); ax_h.set_ylabel('Density', fontsize=7)
+        ax_h.spines['top'].set_visible(False); ax_h.spines['right'].set_visible(False)
+        if ci_idx==0: ax_h.legend(fontsize=5)
+    plt.tight_layout()
+    fname = f"fig4_compB_dist_{cond.replace('+','_')}.png"
+    fig.savefig(f"{OUTPUT_DIR}/{fname}", dpi=200, bbox_inches='tight'); plt.close()
+    print(f"  -> {fname}")
+
+# ── Fig 5: Answer time trajectories — Comparison A ───────────────────
+for cond in CONDS:
+    sub_df = df[df['xai_condition']==cond]
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle(f"Answer Time by Question ID — {cond}\n"
+                 f"Grouped by pressure exposure at moment of task",
+                 fontsize=13, fontweight='bold', y=0.99)
+    # Shared ylim
+    all_at = []
+    for t in ALL_TASKS:
+        rc = f"at_reordered_{t}"
+        if rc in sub_df.columns:
+            for v in sub_df[rc].dropna():
+                if isinstance(v, list): all_at.extend([x for x in v if not np.isnan(x)])
+    at_ylim = (0, np.percentile(all_at, 98)*1.1) if all_at else (0, 25)
+
+    for idx, measured_task in enumerate(ALL_TASKS):
+        ax = axes[idx//2, idx%2]
+        rc = f"at_reordered_{measured_task}"
+        if rc not in sub_df.columns: continue
+        # For each participant, determine if they were exposed when doing this task
+        for exp_val, label, color in [(0,'Never exposed','#2E86AB'), (1,'Exposed','#E8533F')]:
+            # Find participants in this exposure state for this task
+            matching_pids = df_a[(df_a['cond']==cond) &
+                                (df_a['task']==measured_task) &
+                                (df_a['pressure_exposed']==exp_val)]['pid'].values
+            grp = sub_df.loc[sub_df.index.isin(matching_pids)]
+            valid_times = [r for r in grp[rc] if isinstance(r, list)]
+            if not valid_times: continue
+            n_q = max(len(t) for t in valid_times)
+            pad = np.full((len(valid_times), n_q), np.nan)
+            for i, t in enumerate(valid_times): pad[i,:len(t)] = t
+            m = np.nanmean(pad, axis=0)
+            se = np.nanstd(pad, axis=0)/np.sqrt(np.sum(~np.isnan(pad), axis=0))
+            qids = np.arange(n_q)
+            ax.plot(qids, m, color=color, linewidth=2, label=f"{label} (n={len(valid_times)})", alpha=0.9)
+            ax.fill_between(qids, m-se, m+se, color=color, alpha=0.12)
+        ax.set_title(f"On: {DISP[measured_task]}", fontweight='bold')
+        ax.set_xlabel('Question ID'); ax.set_ylabel('Answer Time (s)')
+        ax.set_ylim(at_ylim); ax.legend(fontsize=7)
+        ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False)
+    plt.tight_layout(rect=[0,0,1,0.94])
+    fname = f"fig5_compA_at_{cond.replace('+','_')}.png"
+    fig.savefig(f"{OUTPUT_DIR}/{fname}", dpi=200, bbox_inches='tight'); plt.close()
+    print(f"  -> {fname}")
+
+# ── Fig 6: LMM forest plots ──────────────────────────────────────────
+for comp_label, lmm_rows, models in [
+    ('A', lmm_a_rows, ['Model A1 (exposure only)', 'Model A2 (exposure + task)']),
+    ('B', lmm_b_rows, ['Model B1 (profile only)', 'Model B2 (profile + task)'])]:
+    for model_name in models:
+        for cond in CONDS:
+            rows = [r for r in lmm_rows if r['cond']==cond and r['model']==model_name]
+            if not rows: continue
+            fig, ax = plt.subplots(figsize=(10, max(3, len(rows)*0.5+1)))
+            model_short = model_name.split('(')[0].strip()
+            contrast_label = rows[0]['contrast']
+            fig.suptitle(f"LMM {model_short}: {contrast_label} — {cond}\n{model_name}",
+                         fontsize=11, fontweight='bold')
+            for i, r in enumerate(rows):
+                color = '#333'; alpha = 0.4
+                if r['p_bh'] < 0.05: color = '#2E86AB'; alpha = 1.0
+                elif r['p_bh'] < 0.10: color = '#E8963F'; alpha = 0.8
+                ax.barh(i, r['coef'], color=color, alpha=alpha, height=0.5,
+                        edgecolor='white', linewidth=0.3)
+                ax.plot([r['ci_lo'], r['ci_hi']], [i, i], color='#333', linewidth=1.5,
+                        solid_capstyle='round')
+                sig_txt = f"p={r['p']:.3f}"
+                if r['p_bh'] < 0.10: sig_txt += f" (BH:{p_stars(r['p_bh'])})"
+                ax.text(max(r['ci_hi'], r['coef'])+abs(r['coef'])*0.05+0.01, i,
+                        sig_txt, va='center', fontsize=7, color='#555')
+            ax.set_yticks(range(len(rows)))
+            ax.set_yticklabels([r['dv'] for r in rows], fontsize=8)
+            ax.axvline(0, color='black', linewidth=0.8)
+            ref_label = 'Never exposed' if comp_label=='A' else 'Both Low'
+            ax.set_xlabel(f"β (vs {ref_label})")
+            ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False)
+            plt.tight_layout(rect=[0,0,1,0.88])
+            fname = f"fig6_lmm_{comp_label}_{model_short.replace(' ','_')}_{cond.replace('+','_')}.png"
+            fig.savefig(f"{OUTPUT_DIR}/{fname}", dpi=200, bbox_inches='tight'); plt.close()
+            print(f"  -> {fname}")
+
+# ═══════════════════════════════════════════════════════════════════════
+print("\n"+"="*70+"\nCOMPLETE\n"+"="*70)
+print("""
+CSVs:
+  v9_compA_mw.csv       Comparison A: MW task-level (with corrections)
+  v9_compA_lmm.csv      Comparison A: LMM results (with corrections)
+  v9_compB_mw.csv       Comparison B: MW aggregated (with corrections)
+  v9_compB_lmm.csv      Comparison B: LMM results (with corrections)
+
+Figures:
+  fig1_compA_bars_*.png         Bar charts: Never vs Exposed
+  fig2_compA_dist_*.png         Distributions: Never vs Exposed
+  fig3_compB_bars_*.png         Bar charts: Both Low vs Both Strong
+  fig4_compB_dist_*.png         Distributions: Both Low vs Both Strong
+  fig5_compA_at_*.png           Answer time trajectories by exposure
+  fig6_lmm_*                    LMM forest plots (all models, both comparisons)
+""")
